@@ -1,0 +1,12 @@
+{
+  "image": "gems.png",
+  "frameWidth": 24,
+  "frameHeight": 24,
+  "frames": {
+    "emerald": 0,
+    "ruby": 1,
+    "sapphire": 2,
+    "diamond": 3,
+    "spark": 4
+  }
+}

@@ -1,0 +1,6075 @@
+/**
+ * HUD styling.
+ *
+ * The world is a Phaser canvas; every panel, list and input is DOM layered over
+ * it. That split is deliberate: text entry, scrolling history and responsive
+ * reflow are all things the browser does well and canvas does badly, and it
+ * keeps the game readable on a phone without re-laying-out sprites.
+ *
+ * Chrome is plain CSS: solid fills, borders and radii, with no sprite sheet or
+ * texture behind any surface. The only images left in the HUD are the item
+ * sprites cut from the world sheets, and the game canvas itself.
+ */
+
+:root {
+  /* Ink colours sampled from the sprite pack so text sits on it naturally. */
+  --ink: #40260f;
+  --ink-soft: #7a5230;
+  --parchment: #f3e4c4;
+  --gold: #f5c542;
+  --gold-deep: #b8791b;
+  --wood: #6b4526;
+  --wood-dark: #3a2415;
+
+  --good: #3f8f43;
+  --danger: #c1392b;
+  --live: #4bbf5a;
+
+  --rarity-common: #8a8f94;
+  --rarity-uncommon: #4f9c55;
+  --rarity-rare: #2f7fb8;
+  --rarity-epic: #8b46b8;
+  --rarity-legendary: #d99a1a;
+
+  /* Flat surfaces the whole HUD is built from. */
+  --surface: #f1e2c2;
+  --surface-alt: #fdf6e6;
+  --wood-panel: #6d4a2c;
+  --edge: #4c2d1b;
+  --track: #3b2516;
+
+  --gap: 8px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* One knob for the whole chrome scale. */
+  --slot: 46px;
+
+  /* The bag's shape, as four numbers rather than a hard-coded grid. They live
+     up here because the panel around the grid has to be sized from the same
+     figures -- a width picked independently drifts out of step the moment a
+     breakpoint changes the slot -- and because the HUD's own side columns
+     reserve room for the result. */
+  --bag-cols: 5;
+  --bag-rows: 2;
+  --bag-slot: 46px;
+  --bag-gap: 5px;
+  --bag-pad: 10px;
+
+  /* Item art is drawn at a fixed pixel size by the sprite helper, so the slot
+     scales it rather than the other way round. */
+  --bag-art: 1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The HUD borrows the OS interface face rather than shipping one: it is the
+   most legible thing on any given device at the small sizes this UI uses, and
+   it hints properly, which a pixel face at 11px does not. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #101733;
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  /* The game handles its own gestures; stop the page rubber-banding on iOS. */
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+}
+
+#game canvas {
+  display: block;
+  /* Keep 16px world art crisp at integer zoom instead of letting it blur. */
+  image-rendering: pixelated;
+}
+
+/* ------------------------------------------------------------- primitives */
+
+/* The parchment card every HUD surface is built on: a flat fill, a dark edge
+   and a small radius. Padding replaces the room the old 9-slice border took. */
+.panel {
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 6px 10px 8px;
+  color: var(--ink);
+}
+
+.panel__title {
+  margin: 0 0 5px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wood);
+  font-weight: 700;
+}
+
+/* Wide gold button. */
+.btn {
+  appearance: none;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--gold);
+  color: #3d2506;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 12px;
+  min-height: 34px;
+  cursor: pointer;
+  transition: transform 90ms ease, filter 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  filter: grayscale(0.6) brightness(0.85);
+  cursor: not-allowed;
+  color: #6b5836;
+}
+
+/* A button that has been clicked and is waiting on the server. It is disabled
+   the same way, but it keeps its colour and takes a turning ring: greying out
+   says the button refused, and this one is working. */
+.btn.is-busy:disabled {
+  filter: none;
+  cursor: progress;
+  color: #3d2506;
+}
+
+.btn.is-busy::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 700ms linear infinite;
+}
+
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* Wood tool buttons. With the icon sprites gone the button carries its own
+   name, so the label that used to be screen-reader-only is now the button. */
+.iconbtn {
+  appearance: none;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--wood-panel);
+  color: #ffeecb;
+  display: grid;
+  place-items: center;
+  width: var(--slot);
+  height: var(--slot);
+  padding: 0 2px;
+  cursor: pointer;
+  font: inherit;
+  transition: transform 90ms ease, filter 120ms ease;
+}
+
+.iconbtn:hover {
+  filter: brightness(1.1);
+}
+
+.iconbtn:active {
+  transform: translateY(1px);
+}
+
+.iconbtn__label {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/* Auto-fishing off reads as "switched off" rather than merely unselected. */
+.iconbtn[aria-pressed="false"] {
+  filter: grayscale(0.85) brightness(0.8);
+}
+
+/* Reward and currency markers. Names match the `icon` field the server sends
+   with each reward type, so the catalog still drives which one appears -- but
+   they are now glyphs from the system emoji font, not sprites.
+
+   Gold is a yellow disc rather than the coin at U+1FA99, which is only in the
+   emoji fonts shipped from 2020 onwards and lands as a tofu box on anything
+   older. The disc is Emoji 12 and renders everywhere; it is also the shape the
+   pearl's own white disc had, so the wallet chip did not move. The struck coin
+   is drawn properly on its own `gold.png` sheet (see `build_gold_icon.py`),
+   which is what the bag, the shop rows and the chest reel show. */
+.icon {
+  display: inline-block;
+  margin-right: 4px;
+  font-style: normal;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Bait is the one flat icon with its own artwork behind it, so it draws the
+   worm rather than the caterpillar glyph the rest of this set uses. The sheet
+   holds a single square frame, so `contain` fits it without the frame maths
+   `spriteIcon()` needs for a multi-frame plate. */
+.icon--bait::before {
+  content: "";
+  display: inline-block;
+  width: 1.35em;
+  height: 1.35em;
+  vertical-align: -0.3em;
+  background: url("/assets/bait.png") center / contain no-repeat;
+  image-rendering: pixelated;
+}
+.icon--coin::before { content: "\1F7E1"; }
+.icon--gem::before { content: "\1F48E"; }
+/* Pearl's own glyph, distinct from the uncut gems' \1F48E above -- the two
+   used to share an icon back when Pearl was still called Gems, which was
+   half of why the two were easy to confuse. */
+.icon--pearl::before { content: "\1F9AA"; }
+
+/* Fishing Power has its own artwork rather than a glyph: a four-pointed gold
+   sparkle (see `tools/build_spark_icon.py`). The emoji star it replaced was
+   U+2B50, which is a different five-pointed cartoon in every platform's
+   emoji font.
+
+   `pixelated` like bait now too -- the sparkle used to be drawn smooth at
+   64px, but `assets/generated/spark-icon.png` supplied an actual pixel-art
+   plate, so the builder crops that 1:1 instead of drawing one, and it wants
+   the same crisp scaling bait's worm gets. */
+.icon--xp::before {
+  content: "";
+  display: inline-block;
+  width: 1.35em;
+  height: 1.35em;
+  vertical-align: -0.3em;
+  background: url("/assets/spark.png") center / contain no-repeat;
+  image-rendering: pixelated;
+}
+
+.icon--fish::before { content: "\1F41F"; }
+.icon--charm::before { content: "\1F9ED"; }
+.icon--lure::before { content: "\1F3A3"; }
+.icon--chest::before { content: "\1F4E6"; }
+
+/* A glyph icon standing in for artwork, where a reward has no plate sprite.
+   The `.icon` rules are written for a marker sitting in a line of text -- an
+   inline-block with a right margin and a baseline nudge -- which inside a
+   centred frame reads as the icon being off centre, up and to the left. As
+   artwork it is its own centred box instead, sized by `rewardArt()`. */
+.icon--art {
+  display: grid;
+  place-items: center;
+  margin-right: 0;
+}
+
+.icon--art::before {
+  vertical-align: 0;
+}
+
+/* Item sprites cut from the icon plates. Every dimension is set inline by
+   `spriteIcon()`, so one sheet serves both a 1x list row and a 3x reveal;
+   `pixelated` is what keeps the larger sizes from going soft. */
+.sprite {
+  display: block;
+  flex: none;
+  image-rendering: pixelated;
+}
+
+/* Species cards. The GDD ships artwork for all six fish, so the Log shows the
+   sprite rather than a coloured bar -- the rarity colour survives as the card's
+   top edge. Sized to fit three across the 460px modal. */
+.species {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+}
+
+.species__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px 5px;
+  border-top: 3px solid var(--wood);
+  background: rgba(255, 255, 255, 0.35);
+  text-align: center;
+}
+
+.species__name {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.species__value {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Locked species read as a silhouette: still recognisable in outline, but
+   clearly not something this rod can catch yet. */
+.species__card--locked .sprite {
+  filter: grayscale(1) brightness(0.4);
+  opacity: 0.7;
+}
+
+.species__card--locked .species__name {
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------- gate -- */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: radial-gradient(circle at 50% 35%, #1d3355, #0b1024 75%);
+  z-index: 50;
+}
+
+.gate[hidden] {
+  display: none;
+}
+
+.gate__card {
+  width: min(430px, 100%);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 18px 22px 22px;
+  text-align: center;
+  color: var(--ink);
+}
+
+.gate__title {
+  margin: 0 0 6px;
+  font-size: 26px;
+  color: var(--wood);
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.gate__blurb {
+  margin: 0 0 18px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.gate__label {
+  display: block;
+  text-align: left;
+  font-size: 12px;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.gate__input,
+.chat__input {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  padding: 6px 10px;
+}
+
+.gate__input {
+  font-size: 15px;
+  min-height: 44px;
+}
+
+.gate__input:focus,
+.chat__input:focus {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+
+.gate__error {
+  min-height: 16px;
+  margin: 6px 0 10px;
+  font-size: 12px;
+  color: var(--danger);
+  text-align: left;
+}
+
+.gate__start {
+  width: 100%;
+  font-size: 14px;
+  min-height: 46px;
+}
+
+.gate__returning {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--good);
+}
+
+.gate__forget {
+  margin-top: 8px;
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ----------------------------------------------------------------- HUD -- */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  padding: calc(var(--gap) + var(--safe-top)) var(--gap)
+    calc(var(--gap) + var(--safe-bottom));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "top  top   top"
+    "left .     right"
+    "chat dials bag";
+  gap: var(--gap);
+  align-items: end;
+  z-index: 10;
+}
+
+.hud[hidden] {
+  display: none;
+}
+
+/* Only interactive surfaces catch pointer events; the world stays clickable. */
+.hud .panel,
+.hud .btn,
+.hud .iconbtn,
+.hud .pill {
+  pointer-events: auto;
+}
+
+/* Identity on the left, wallet on the right. The cast bar lives down with the
+   dials that drive it, not up here. */
+.topbar {
+  grid-area: top;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--gap);
+  align-items: start;
+}
+
+/* A sunken track with the fill painted straight onto it. */
+
+.cast__track {
+  position: relative;
+  height: 26px;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.cast__fill {
+  position: absolute;
+  inset: 0;
+  right: auto;
+  width: 0;
+  transition: width 220ms ease;
+}
+
+.cast__fill {
+  background: linear-gradient(180deg, #7fc6e8, #2f7fb8);
+  transition: none; /* driven per frame; a transition would lag the bar */
+}
+
+.cast__label {
+  font-size: 11px;
+  color: var(--wood);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+
+/* ---- wallet pills ---- */
+
+.wallet {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Currency chips. The coin the pill sprite used to carry on its left is now a
+   glyph in the same slot, so the number still reads clear of the marker. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 82px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pill::before {
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+/* Same worm as the shelf and the bag, so the wallet's bait count is marked by
+   what the player actually buys rather than by a lookalike emoji. It is set a
+   little larger than the two glyph pills beside it because the worm's detail
+   goes to mush at their 0.85em. Sized in `em` like they are, so it follows the
+   pill down through the narrow-viewport overrides.
+
+   `pixelated` here, same as the shelf: 1.4em lands above the plate's own
+   14px at every pill size, and smooth upscaling would blur the worm's pixel
+   edges rather than keeping them square. */
+.pill--bait::before {
+  content: "";
+  flex: none;
+  width: 1.4em;
+  height: 1.4em;
+  background: url("/assets/bait.png") center / contain no-repeat;
+  image-rendering: pixelated;
+}
+.pill--coin::before { content: "\1F7E1"; }
+.pill--pearl::before { content: "\1F9AA"; }
+.pill--usdg::before { content: none; }
+
+/* ---- side lists ---- */
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+  align-self: start;
+}
+
+.side--left { grid-area: left; align-items: start; }
+.side--right { grid-area: right; align-items: end; }
+
+.board {
+  width: min(208px, 46vw);
+  max-height: min(34vh, 240px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.board__list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 11px;
+}
+
+.board__list--plain {
+  list-style: none;
+  padding-left: 0;
+}
+
+.board__list li {
+  margin-bottom: 3px;
+}
+
+.board__sub {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+  margin-right: 5px;
+  vertical-align: 1px;
+}
+
+.dot--away { background: #a99276; }
+
+.you {
+  color: var(--gold-deep);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------- bottom-left: chat */
+
+.chat {
+  grid-area: chat;
+  justify-self: start;
+  width: min(300px, 42vw);
+  display: grid;
+  gap: 4px;
+}
+
+.chat__toggle {
+  justify-self: start;
+  background: none;
+  border: 0;
+  color: var(--wood);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chat__log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  height: 84px;
+  font-size: 11px;
+  scrollbar-width: thin;
+}
+
+.chat.is-collapsed .chat__log,
+.chat.is-collapsed .chat__form {
+  display: none;
+}
+
+.chat__log li {
+  margin-bottom: 2px;
+  word-break: break-word;
+}
+
+.chat__time {
+  color: var(--ink-soft);
+  margin-right: 5px;
+}
+
+.chat__who {
+  color: var(--gold-deep);
+  margin-right: 4px;
+  font-weight: 700;
+}
+
+.chat__who--system {
+  color: var(--rarity-rare);
+}
+
+.chat__form {
+  display: flex;
+  gap: 4px;
+}
+
+.chat__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.btn--send {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+/* Visually hidden but still reachable by assistive tech -- used where a line
+   of explainer text moved to a hover tooltip to save the panel some height. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------ bottom-centre: control bar */
+
+/**
+ * Cast progress stacked over the stake strip and the rod badge.
+ *
+ * `align-items: stretch` is what makes the cast bar span exactly the width of
+ * the row below it, without having to hard-code a width that would then
+ * drift every time a chip changes size.
+ */
+.dials {
+  grid-area: dials;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--gap);
+  justify-self: center;
+}
+
+.dials__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: stretch;
+}
+
+/* The Risk Dial: Steady / Balanced / Risky, side by side and equally
+   weighted, so the curve is read across at a glance.
+
+   Styled as a gauge, not a control -- no pointer cursor, no hover state, no
+   press affordance. The only thing that changes is which of the three is lit,
+   and the player changes that by moving the Stake, not by touching this. */
+.riskdial {
+  display: flex;
+  gap: 5px;
+}
+
+.riskband {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  text-align: center;
+  border: 2px solid var(--edge);
+  border-radius: 7px;
+  background: var(--surface-alt);
+  /* Unlit bands step back rather than disappearing: the two a player is not
+     on are what give the lit one its meaning. */
+  opacity: .5;
+  transition: opacity 120ms ease;
+}
+
+.riskband[aria-current="true"] { opacity: 1; }
+
+.riskband__name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.riskband[aria-current="true"] .riskband__name { color: var(--ink); }
+
+/* The read-out under the stake row: the chosen rung's name, what it trades,
+   and what it can win.
+
+   Two lines, clamped -- not one ellipsised line. The strip is narrow (it
+   shares the control bar with the auto button and the rod badge) and one line
+   cut the chest list off at every rung past the first, which is the half of
+   the sentence a player is actually choosing between. Clamping at two lines
+   with the height reserved either way shows the whole thing at desktop widths
+   and still keeps the bar from jumping as the lever moves. */
+.stakenote {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.3;
+  min-height: 2.6em;
+  color: var(--ink-soft);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.stakerow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.stakerow__label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.chiprow {
+  display: flex;
+  gap: 3px;
+}
+
+/* In the stake row the chips size to their own digits rather than sharing the
+   width, so "1" does not become as wide a target as "40". */
+.stakerow .chiprow { flex: 1 1 auto; }
+
+/* Stake options are slots: cream when idle, gold when chosen. */
+.chip {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 120ms ease;
+}
+
+.chip:hover {
+  filter: brightness(1.06);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--gold);
+  color: #3d2506;
+}
+
+/* A Stake rung not yet unlocked by rod level: visible on the ladder (so a
+   player can see what's coming) but not selectable. The lock glyph reuses
+   the chip's own label row rather than a separate element, so the layout
+   this repeats across every theme block below stays a single line change. */
+.chip.is-locked {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.4);
+}
+
+.chip.is-locked:hover {
+  filter: grayscale(0.4);
+}
+
+.chip.is-locked::after {
+  content: "\1F512";
+  margin-left: 3px;
+  font-size: 9px;
+  vertical-align: middle;
+}
+
+.control__hint {
+  margin: 5px 0 0;
+  font-size: 10px;
+  color: var(--ink-soft);
+  min-height: 13px;
+}
+
+/* The rod badge: level, progress to the next one, and the one-click skip --
+   sized to its own content rather than stretching, so it sits beside the
+   Stake strip as a fixed-width companion instead of competing with it for
+   the row. */
+.rodpanel {
+  flex: 0 0 auto;
+  width: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 9px;
+}
+
+.rodpanel__level {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.rodpanel__track {
+  height: 8px;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--surface-alt);
+  overflow: hidden;
+}
+
+.rodpanel__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--gold);
+  transition: width 200ms ease;
+}
+
+/* Only shown once a skip is actually affordable -- see `renderRodPanel`. Full
+   width and stacked under the bar rather than beside the level number, so
+   "Level Up!" always has room without pushing the panel wider. */
+.rodpanel__cta {
+  width: 100%;
+  padding: 3px 0;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  color: #3d2506;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: var(--gold);
+  cursor: pointer;
+  white-space: nowrap;
+  animation: rodpanel-cta-pulse 1.6s ease-in-out infinite;
+}
+
+.rodpanel__cta:hover { filter: brightness(1.08); }
+
+@keyframes rodpanel-cta-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(230, 184, 78, 0); }
+  50% { box-shadow: 0 0 8px rgba(230, 184, 78, 0.65); }
+}
+
+/* --------------------------------------------------- bottom-right: bag */
+
+.bagzone {
+  grid-area: bag;
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.iconbar {
+  display: flex;
+  gap: 5px;
+}
+
+.bag {
+  width: min(300px, 46vw);
+}
+
+.bag__count {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+/**
+ * Fixed slot size rather than fractional columns, so the scroll height can be
+ * an exact number of rows. With `1fr` columns the last visible row was always
+ * sliced in half, which read as a rendering fault rather than as "scroll for
+ * more".
+ */
+.baggrid {
+  display: grid;
+  grid-template-columns: repeat(var(--bag-cols), minmax(0, var(--bag-slot)));
+  grid-auto-rows: var(--bag-slot);
+  justify-content: space-between;
+  gap: var(--bag-gap);
+  max-height: calc(
+    var(--bag-rows) * var(--bag-slot) + (var(--bag-rows) - 1) * var(--bag-gap)
+  );
+  overflow-y: auto;
+  /* Columns are fixed-width, so a couple of pixels of rounding must not add a
+     horizontal scrollbar under the slots. */
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.bagslot {
+  position: relative;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 90ms ease, filter 120ms ease;
+}
+
+.bagslot--empty {
+  cursor: default;
+  filter: brightness(0.94) saturate(0.7);
+}
+
+.bagslot:not(.bagslot--empty):hover {
+  filter: brightness(1.1);
+}
+
+.bagslot:not(.bagslot--empty):active {
+  transform: translateY(1px);
+}
+
+/**
+ * Centred on the slot rather than fitted inside it.
+ *
+ * `inset` used to do both jobs at once, which stopped working when the icons
+ * became real sprites: a sprite carries its own width and height, so the
+ * right/bottom halves of the inset were ignored and every item sat pinned to
+ * the slot's top-left corner. Explicit centring is what a sized child needs.
+ *
+ * Consumables have no world sprite, so they fall back to a glyph set by
+ * `bagslot__art` itself; the sizes below are what that text is centred in.
+ *
+ * `scale(var(--bag-art))` belongs on this base rule, not bolted on only at
+ * the >=1001px tier further down: every breakpoint sets `--bag-art` (root
+ * default included), so declaring the scale here is what makes the sprite
+ * track the slot size everywhere instead of only above 1000px, where it used
+ * to fall back to native pixel size and overflow the shrunk slot.
+ *
+ * `translate(0, var(--art-offset-y, 0))` is last (rightmost, so it is the
+ * first thing applied, in native sprite pixels, before `scale` blows it up
+ * to the slot's size) so a fish can be nudged up out of fish.png's baked-in
+ * bottom alignment -- see `BAG_FISH_ART_OFFSET_Y` in hud.js, which is the
+ * only thing that ever sets `--art-offset-y`. Every other bag item leaves it
+ * unset and gets the `0` fallback, i.e. no shift.
+ */
+.bagslot__art {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(var(--bag-art)) translate(0, var(--art-offset-y, 0));
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/**
+ * Chest/gem tier used to be a solid bar along the bottom of the slot. That
+ * read fine on its own but doubled up with the gold "has an item" border
+ * every filled slot already carries, and ate into the art's vertical centre.
+ * The tier colour now IS the slot's frame instead (`.bagslot--tiered`, set
+ * from `--tier-color`) -- one ring around the whole item rather than a strip
+ * under it.
+ *
+ * That rule lives with the rest of `.bagslot`'s border colour, further down
+ * this file ("shared wood chrome" section): this file's cascade is win-by-
+ * order, not win-by-position-here, so a rule placed only here would lose to
+ * the later, equally-specific `.bagslot:not(.bagslot--empty)` border-colour
+ * rule and never actually show.
+ */
+
+.bagslot__count {
+  position: absolute;
+  right: -3px;
+  bottom: -4px;
+  min-width: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--wood-dark);
+  color: var(--parchment);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* -------------------------------------------------------------- status -- */
+
+.status {
+  position: absolute;
+  left: 50%;
+  bottom: calc(50% - 40px);
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #3d2506;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--gold);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.status[hidden] {
+  display: none;
+}
+
+.status--warn {
+  filter: hue-rotate(-25deg) saturate(1.4);
+}
+
+/* -------------------------------------------------------------- toasts -- */
+
+/* Centred under the cast bar: anchored to the right they sat on top of the
+   online-players panel, which occupies that corner.
+
+   A body-level sibling of `.hud`/`.modal`/`.gate` now (see index.html),
+   not a child of `.hud` -- `.hud` is its own stacking context, so nothing
+   inside it can out-rank an open modal's scrim no matter its own z-index.
+   `position: fixed` keeps the same viewport-relative offset `.hud`'s
+   padding-box origin already gave it (that box starts at the viewport edge,
+   same as this now does directly), so the numbers below are unchanged.
+
+   `.hud`'s own `pointer-events: none` no longer reaches this, so it is
+   restated here: the container itself stays click-through (there is often
+   empty space in its flex gaps, and it can now sit above an open modal),
+   while each toast bubble opts back in below. */
+.toasts {
+  position: fixed;
+  top: calc(112px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  max-width: min(320px, 70vw);
+  pointer-events: none;
+  z-index: 45;
+}
+
+.toasts > * {
+  pointer-events: auto;
+}
+
+.toast {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface);
+  animation: toast-in 180ms ease-out;
+}
+
+.toast--error { filter: saturate(0.5) hue-rotate(-15deg); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------------------ pickups -- */
+
+/* BOTW-style "you got an item" banners: rectangular strips anchored to the
+   right edge of the screen, vertically centred so they clear the online
+   list (top-right) and the bag panel (bottom-right). Each slides in from
+   off-edge, sits, then slides back out; `.hud`'s own overflow:hidden body
+   is what clips the slide rather than any bound on this container. New
+   banners append at the end, same order as `.toasts`, so the freshest pickup
+   is the one nearest the bottom of the stack. */
+.pickups {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(240px, 60vw);
+  pointer-events: none;
+  z-index: 15;
+}
+
+.pickup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px 5px 0;
+  background: var(--wood-panel);
+  border: 1px solid var(--edge);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  box-shadow: -2px 3px 8px rgba(0, 0, 0, 0.35);
+  animation: pickup-in 260ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.pickup--leaving {
+  animation: pickup-out 220ms ease-in forwards;
+}
+
+/* The tier-colour accent strip, flush with the panel's left (world-facing)
+   edge -- the same signal a bag slot gives with its border, just read as a
+   stripe here since the banner has no room for a full swatch border. */
+.pickup__swatch {
+  align-self: stretch;
+  width: 4px;
+  border-radius: 3px 0 0 3px;
+  background: var(--tier-color, var(--gold));
+  flex: 0 0 auto;
+}
+
+.pickup__art {
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+
+.pickup__art:not(.sprite) {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--tier-color, var(--gold-deep));
+}
+
+.pickup__body {
+  min-width: 0;
+}
+
+.pickup__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--parchment);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pickup__sub {
+  font-size: 11px;
+  color: var(--gold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes pickup-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes pickup-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(100%); }
+}
+
+/* -------------------------------------------------------------- modals -- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  /* A fixed track, not an auto one. Without this, wide content inside the card
+     -- the chest reel's track is thousands of pixels long -- sizes the column
+     to its own max-content, and centring then pushes the card off screen. */
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  padding: 16px;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 10, 24, 0.72);
+}
+
+.modal__card {
+  position: relative;
+  width: min(460px, 100%);
+  max-height: min(78vh, 620px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 16px 18px 18px;
+  color: var(--ink);
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid rgba(107, 69, 38, 0.35);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--wood);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.modal__close {
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.modal__close:hover {
+  color: var(--ink);
+}
+
+.modal__body {
+  padding: 10px 2px 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* An appraisal always has a fixed, compact layout; suppress the otherwise
+   always-available modal scrollbar so it cannot appear beside the animation. */
+.modal__body--appraise {
+  overflow-y: hidden;
+}
+
+.modal__body--leaderboard {
+  padding: 10px 4px 4px;
+}
+
+/**
+ * The dark modal skin.
+ *
+ * Everything else in the HUD is a parchment card, because it's chrome the
+ * player works in -- shopping, reading a journal, grading a gem. A
+ * leaderboard is only ever glanced at and closed, so it gets a night-dark
+ * card with gold text instead: a board on a tavern wall, not another sheet
+ * of paper.
+ */
+.modal--dark .modal__card {
+  background: linear-gradient(180deg, #2b1a0f, #1b100a);
+  border-color: var(--wood);
+  color: var(--parchment);
+}
+
+.modal--dark .modal__head {
+  border-bottom-color: rgba(245, 197, 66, 0.22);
+}
+
+.modal--dark .modal__title {
+  color: var(--gold);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.modal--dark .modal__subtitle {
+  color: rgba(243, 228, 196, 0.55);
+}
+
+.modal--dark .modal__close {
+  color: rgba(243, 228, 196, 0.55);
+}
+
+.modal--dark .modal__close:hover {
+  color: var(--gold);
+}
+
+/* The wallet names itself over the middle of its card, the way a purchase
+   dialog does, rather than along the left like every panel that is a list of
+   things. Only the title moves: the close button keeps the corner it has in
+   every other modal, so it is where a player already reaches for it. */
+.modal--wallet .modal__head {
+  position: relative;
+  justify-content: center;
+}
+
+.modal--wallet .modal__title {
+  text-align: center;
+}
+
+.modal--wallet .modal__close {
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+/* Leaderboard rows: rank, avatar, name + sub, score -- in that order, the
+   same shape as any ranked list, just dressed for the dark card above. */
+.lb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(245, 197, 66, 0.08);
+}
+
+.lb-row--me {
+  border-color: var(--gold);
+  background: rgba(245, 197, 66, 0.14);
+}
+
+/* The highlighted row sits on a lighter, warmer tint than the rest of the
+   list, so the muted rank number and subtitle -- tuned for the dark rows --
+   need their own darker ink here to stay legible. */
+.lb-row--me .lb-rank,
+.lb-row--me .lb-sub {
+  color: var(--wood-dark);
+}
+
+.lb-rank {
+  flex: 0 0 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(243, 228, 196, 0.5);
+}
+
+/* The top three get a medal disc instead of a plain number -- the one flourish
+   the reference leaderboard didn't have but earns its keep at a glance. */
+.lb-rank--1,
+.lb-rank--2,
+.lb-rank--3 {
+  border-radius: 50%;
+  color: #2c1a0d;
+}
+
+.lb-rank--1 { background: linear-gradient(180deg, #ffe27a, #d99a1a); }
+.lb-rank--2 { background: linear-gradient(180deg, #eef1f4, #b9c0c8); }
+.lb-rank--3 { background: linear-gradient(180deg, #e3a877, #a9683a); }
+
+.lb-avatar {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fdf6e6;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.lb-id {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lb-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f9edd2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-name--me {
+  color: var(--gold);
+}
+
+.lb-sub {
+  font-size: 11px;
+  color: rgba(243, 228, 196, 0.5);
+}
+
+.lb-score {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+/**
+ * The full-screen modal.
+ *
+ * Opening a chest takes the whole screen rather than a card in the middle of
+ * it: the reel runs the full width, and the world behind is dimmed nearly out
+ * so the only thing lit is what came out of the chest.
+ *
+ * The card is not replaced, it is dissolved -- same element, no frame, no
+ * background, filling the viewport. Everything inside keeps working, which is
+ * what lets one panel be a dialog in one state and the screen in another.
+ */
+.modal--full { padding: 0; }
+
+/* Darker than a dialog's scrim. The world is left just legible enough to place
+   you, and nothing more -- the point of taking the screen is that the chest is
+   the only thing on it. */
+.modal--full .modal__scrim { background: rgba(4, 6, 13, 0.94); }
+
+.modal--full .modal__card {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  padding: 18px 16px 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* Heading block, centred at the top of the screen. The close button goes with
+   the frame -- the actions at the foot are the way out of a full-screen. */
+.modal--full .modal__head {
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.modal--full .modal__close { display: none; }
+
+.modal--full .modal__title {
+  font-size: 26px;
+  line-height: 1.1;
+  text-align: center;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #ffe6a8;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55);
+}
+
+.modal__subtitle {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 240, 204, 0.62);
+}
+
+/* The body becomes the screen: a column with the stage taking whatever is left
+   between the heading and the foot. */
+.modal--full .modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.modal--full .chestopen {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+}
+
+/* No plinth in full screen -- the chest stands on the dimmed world, lit only
+   by its own tier glow. A bordered box here would put the card back. */
+.modal--full .chestopen__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    color-mix(in srgb, var(--tier) 34%, transparent),
+    transparent 62%
+  );
+  overflow: visible;
+}
+
+/* Wider than the chest by more than double, so the name reads as written
+   around the stage rather than as a collar on the lid. */
+.modal--full .namering { width: 288px; height: 288px; }
+
+/* The reel crosses the whole screen rather than sitting in a panel, which is
+   what makes it read as a wheel passing through rather than a widget. It is
+   laid over the chest instead of under it, so the two occupy one moment. */
+.modal--full .chestopen { position: relative; }
+
+.modal--full .reel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* Over the chest, not under it. `.chestopen__chest` lifts itself to 1 to
+     clear the name ring, and the stage is not a stacking context, so that lift
+     reaches this far and the chest would otherwise punch through the middle of
+     the strip. The cards are what is being drawn from the chest: they pass in
+     front of it, and the chest is only still there to be opened. */
+  z-index: 2;
+  width: 100vw;
+  margin-left: -50vw;
+  transform: translateY(-50%);
+}
+
+/* The foot: what was won, then what the sitting has come to, then the actions.
+   Held to a readable column width even though the screen is wider. */
+.modal--full .chestwon,
+.modal--full .haul,
+.modal--full .chestopen__actions,
+.modal--full .maybe {
+  width: min(460px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+  flex: 0 0 auto;
+}
+
+.modal--full .maybe,
+.modal--full .haul {
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 240, 204, 0.16);
+}
+
+.modal--full .maybe { padding-bottom: 12px; }
+
+.modal--full .maybe__row,
+.modal--full .haul__list {
+  width: min(460px, 100%);
+  margin: 0 auto;
+}
+
+.modal--full .chestwon { padding: 14px 0 4px; }
+
+/* Ruled off the same way the strip above it is, so the foot of the screen is
+   two banded rows rather than content trailing away into the dark. */
+.modal--full .chestopen__actions {
+  justify-content: center;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 240, 204, 0.16);
+}
+
+/* Sized to their labels and centred, rather than one stretching across a card
+   that is no longer there. */
+.modal--full .chestopen__actions > .chestopen__spin {
+  flex: 0 0 auto;
+  min-width: 168px;
+}
+
+/* On the dimmed world the parchment buttons all read as one cream block, so
+   the row is redrawn as one lit button and two slabs: opening is the thing to
+   do, closing and emptying the stack are the two ways round it. */
+.modal--full .chestopen__actions > .btn {
+  min-height: 36px;
+  padding: 4px 18px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.modal--full .chestopen__actions > .chestopen__done {
+  border-color: rgba(255, 240, 204, 0.18);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 240, 204, 0.8);
+}
+
+.modal--full .chestopen__actions > .chestopen__spin,
+.modal--full .chestopen__actions > .chestopen__claim {
+  border-color: color-mix(in srgb, var(--gold) 72%, #7a4a10);
+  background: linear-gradient(180deg, #f8ba46, #e08a1c);
+  color: #3d2506;
+}
+
+.modal--full .chestopen__actions > .chestopen__all {
+  border-color: rgba(255, 240, 204, 0.16);
+  background: color-mix(in srgb, var(--gold) 30%, rgba(10, 7, 5, 0.8));
+  color: rgba(255, 240, 204, 0.86);
+}
+
+/* Everything below the stage was drawn for parchment. On the dimmed world it
+   has to invert: dark slabs, light lettering. The rarity tints carry over
+   untouched, which is what keeps a Legendary reading as gold in both. */
+.modal--full .chestwon__title { color: #ffe6a8; }
+.modal--full .chestwon__blurb { color: rgba(255, 240, 204, 0.62); }
+.modal--full .chestwon__bonus { color: #8fe388; }
+
+.modal--full .chestwon__count {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 240, 204, 0.78);
+}
+
+.modal--full .haul__title,
+.modal--full .haul__total,
+.modal--full .maybe__title { color: rgba(255, 240, 204, 0.55); }
+
+.modal--full .haul__row {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2e2c4;
+}
+
+/* The disconnect panel. There is nothing behind it to go back to, so the close
+   button is taken away rather than left to be clicked at and do nothing --
+   the one button in the body is the only way on. The scrim goes fully opaque
+   for the same reason: a frozen harbor showing through reads as still playing. */
+.modal--final .modal__close {
+  display: none;
+}
+
+.modal--final .modal__scrim {
+  background: rgba(6, 10, 24, 0.93);
+}
+
+.gone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.gone__lede {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.gone__note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.gone__rejoin {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* The rod upgrade row in the journal. The shop has its own counter below. */
+
+.shoprow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+}
+
+.shoprow__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shoprow__name {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.shoprow__desc {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- shop -- */
+
+/**
+ * The chandlery counter.
+ *
+ * Three bands stacked in the modal card: a filter bar, the shelf, and the
+ * counter where one item is discussed and paid for. The shelf scrolls; the bar
+ * and the counter do not, so the thing being bought stays on screen however
+ * long the stock list gets.
+ */
+/* The panel fills the dialog rather than scrolling inside it: the shelf takes
+   whatever height is going and the counter at the foot stays where it is, so
+   the thing being bought never scrolls out from under the buttons that buy it.
+   `--shop-body` is what the dialog gives up to it. */
+.modal__body--shop {
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.shop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.shop__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* What the player has brought to spend, at the far end of the bar -- the same
+   place the shelf's own prices sit, so the two read against each other. */
+.shop__wallet {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 11px;
+  min-height: 36px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--wood-panel);
+  color: #ffeecb;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* `currencyIcon()` now sizes the sprite itself, background-size and all, so the
+   coin no longer needs the transform it used to be shrunk with -- it sits in
+   the row at its own size. */
+.shop__coin {
+  margin-top: -1px;
+}
+
+/* Fixed columns, not auto-fit: an item's stock number is what a player scans
+   down, and a grid that reflows by viewport width breaks that column up. */
+.shop__grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+  /* Takes the slack and gives it back first: everything else in the panel is
+     a fixed-height band, so the shelf is the only thing that can absorb a
+     short window. `align-content` keeps the rows at the top as it grows. */
+  flex: 1 1 auto;
+  align-content: start;
+  min-height: 130px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  padding-right: 2px;
+}
+
+.shopslot {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 90ms ease, filter 120ms ease;
+}
+
+.shopslot--empty {
+  cursor: default;
+  filter: brightness(0.94) saturate(0.7);
+}
+
+.shopslot:not(.shopslot--empty):hover {
+  filter: brightness(1.08);
+}
+
+.shopslot:not(.shopslot--empty):active {
+  transform: translateY(1px);
+}
+
+/* The selected slot is ringed rather than tinted: a tint would fight the
+   sprite, and the ring is what the counter below is talking about. Gold,
+   because that is what "chosen" already means on the stake row. */
+.shopslot.is-selected {
+  border-color: var(--gold-deep);
+  box-shadow: inset 0 0 0 1px var(--gold-deep);
+}
+
+/* Sold out and not-for-sale read the same way -- greyed, still selectable, so
+   the counter can say which of the two it is. */
+.shopslot.is-out,
+.shopslot.is-locked {
+  filter: grayscale(0.75) brightness(0.92);
+}
+
+/* How many the harbour has left. Top-left, because it is the number that
+   decides whether the rest of the slot is worth reading. */
+.shopslot__stock {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  right: 4px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How much one purchase hands over, opposite the stock count and in the same
+   gold the chosen quantity is written in -- it is a fact about the order being
+   built, not about the shelf. */
+.shopslot__bundle {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--gold-deep);
+}
+
+/* The stock count is left of the badge and must give way to it rather than
+   run underneath: the shelf number can reach five digits. */
+.shopslot__stock {
+  right: auto;
+  max-width: calc(100% - 46px);
+}
+
+/* The box `SHOP_SLOT_ART` reserves in the slot (the slot itself grows with the
+   dialog -- five columns of a ~700px-wide shop land each one around 125px). A
+   sprite arrives already sized to fit it -- at or under this box, never over
+   -- and keeps that inline size; the glyph fallback is the one that needs the
+   width and height here to centre itself. */
+.shopslot__art {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 90px;
+  height: 90px;
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  line-height: 1;
+}
+
+.shopslot__price {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--wood-dark);
+}
+
+.shopslot__price .icon {
+  margin-right: 0;
+}
+
+/* ------------------------------------------------------- shop counter -- */
+
+.shop__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+
+.shop__detailhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+/* Holds `SHOP_DETAIL_ART` with a little air around it. The glyph fallback is
+   sized inline to the same box, so no font-size is set here. */
+.shop__detailart {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.shop__detailtext {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shop__detailname {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--wood-dark);
+}
+
+.shop__detaildesc {
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin-bottom: 5px;
+}
+
+.shop__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.shop__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  background: rgba(107, 69, 38, 0.12);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--wood-dark);
+}
+
+/* The label half of a chip: set small and quiet beside its number, so the row
+   reads as a spec sheet rather than as a sentence. */
+.shop__chipkey {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.shop__chipval {
+  font-weight: 700;
+}
+
+/* What the whole order costs, which is the one number in the row the wallet
+   above is read against -- ringed so it is found first. */
+.shop__chip--price {
+  border: 1px solid var(--gold-deep);
+  background: rgba(245, 197, 66, 0.18);
+}
+
+.shop__chip--type .shop__chipval {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.shop__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shop__qty {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+.shop__step {
+  appearance: none;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: rgba(107, 69, 38, 0.12);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 34px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.shop__step[aria-pressed="true"] {
+  background: var(--gold);
+  border-color: var(--gold-deep);
+  color: #3d2506;
+}
+
+.shop__step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Custom is the only step that opens something rather than setting a number,
+   and the only one whose label changes -- dashed until it carries an amount,
+   solid like every other step once it does. */
+.shop__step--custom {
+  border-style: dashed;
+}
+
+.shop__step--custom.is-set {
+  border-style: solid;
+}
+
+/* ------------------------------------------------ shop: custom amount -- */
+
+/* A sheet over the counter rather than a panel beside it: the shelf behind it
+   goes on ticking, and cancelling leaves the shop exactly as it was found. */
+.shopamount {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border-radius: 10px;
+  background: rgba(30, 17, 8, 0.55);
+}
+
+.shopamount__card {
+  width: min(340px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 10px 26px rgba(20, 10, 4, 0.45);
+}
+
+.shopamount__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(107, 69, 38, 0.35);
+}
+
+.shopamount__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--wood-dark);
+}
+
+.shopamount__close {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.shopamount__close:hover {
+  color: var(--ink);
+}
+
+/* What is being counted, so the number below has a subject. */
+.shopamount__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shopamount__art {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+}
+
+.shopamount__name {
+  font-size: 15px;
+  color: var(--wood-dark);
+}
+
+.shopamount__limit {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.shopamount__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shopamount__nudge {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: rgba(107, 69, 38, 0.12);
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shopamount__nudge:hover {
+  background: rgba(107, 69, 38, 0.2);
+}
+
+.shopamount__slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--gold-deep);
+  cursor: pointer;
+}
+
+.shopamount__value {
+  flex: 0 0 auto;
+  width: 84px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--gold-deep);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.shopamount__actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* The same pair the counter below uses, in the same order and the same two
+   colours: walking away and spending must not read alike here either. */
+.shopamount__cancel,
+.shopamount__set {
+  flex: 1 1 0;
+  min-height: 38px;
+}
+
+.shop__confirm {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.shop__cancel {
+  background: var(--danger);
+  color: #fff3ef;
+  min-width: 88px;
+}
+
+.shop__accept {
+  background: var(--good);
+  color: #f2fff0;
+  min-width: 112px;
+}
+
+/* The same button pointed at the Gold Wallet instead of at the shelf. Gold
+   rather than green, because it is not the buy: it is the errand you run
+   before the buy. */
+.shop__accept--gold {
+  background: var(--gold);
+  border-color: var(--gold-deep);
+  color: #3d2506;
+}
+
+/* The shelf needs more than the 460px a base dialog gets; five columns in that
+   width leave a slot too small for a sprite and a price to share. Widened
+   again (560 -> 700) to give `SHOP_SLOT_ART` room to land the fish at a clean
+   2x instead of the 1x it was capped to before. */
+.modal--wide .modal__card {
+  width: min(700px, 100%);
+  max-height: min(90vh, 820px);
+}
+
+/* ---------------------------------------------------------- shopkeeper -- */
+
+/**
+ * The bait seller, standing over the top of the shop panel.
+ *
+ * Centred on the card, with the bottom edge of his bench lapping just far
+ * enough over the card's top border that the two read as one object rather
+ * than as a picture resting on a dialog. Only just, though: any deeper and his
+ * bench crosses the panel's title. He is `pointer-events: none` throughout --
+ * he is the shop's face, not a control, and a click meant for the scrim must
+ * pass through him.
+ */
+/* How much of the window is held back above the card for him to stand in.
+   One value, read by both the padding that makes the room and the card height
+   that must live inside what is left. */
+.modal--keeper {
+  --keeper-room: clamp(120px, 30vh, 240px);
+}
+
+.keeper {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 12px);
+  transform: translateX(-50%);
+  /* Scaled off the window rather than fixed: he has to stay in proportion to a
+     card that is itself sized against the viewport. The second term is the
+     same size expressed against height -- his plate is 1.53 wide to 1 tall, so
+     capping the width at 44vh caps his height at about 29vh -- which is what
+     keeps him inside the reserve below on a short, wide window. */
+  width: min(clamp(240px, 26vw, 360px), 44vh);
+  max-width: none;
+  pointer-events: none;
+  /* Deliberately smooth, not `pixelated`. The plate is a high-resolution
+     render in a pixel-art style rather than real low-res pixels, and it is
+     being scaled *down* here -- nearest-neighbour just drops every other row
+     of his beard. */
+  filter: drop-shadow(0 6px 10px rgba(28, 16, 8, 0.45));
+}
+
+.keeper[hidden] {
+  display: none;
+}
+
+/**
+ * Room for him to stand in.
+ *
+ * He is positioned against the card, but the card is centred in the modal, so
+ * without this he is centred too and his head goes off the top of the window.
+ * Padding the grid pushes the card down into what is left, which is the one
+ * place the two can be kept in step without either knowing the other's height.
+ */
+.modal--keeper {
+  padding-top: var(--keeper-room);
+}
+
+/* The card is centred in whatever the reserve leaves, so it also has to agree
+   not to fill the window: at its own 86vh it would overflow the shortened box
+   and push itself off both ends. */
+.modal--keeper .modal__card {
+  max-height: calc(100vh - var(--keeper-room) - 32px);
+}
+
+/* Below this there is no room above the card for him, and shrinking him
+   further would make him a smudge rather than a shopkeeper. */
+@media (max-width: 720px), (max-height: 620px) {
+  .keeper {
+    display: none;
+  }
+
+  .modal--keeper {
+    padding-top: 16px;
+  }
+}
+
+/* The shelf keeps its five columns at every width -- a slot is only a sprite
+   and two small numbers, so it survives narrowing, and dropping a column would
+   put the filler row out of step with SHOP_COLUMNS in hud.js. */
+@media (max-width: 560px) {
+  .shop__confirm {
+    width: 100%;
+  }
+
+  .shop__cancel,
+  .shop__accept {
+    flex: 1 1 0;
+  }
+}
+
+.section-title {
+  margin: 14px 0 7px;
+  font-size: 12px;
+  color: var(--wood);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.section-title:first-child {
+  margin-top: 0;
+}
+
+.empty {
+  color: var(--ink-soft);
+  font-size: 12px;
+  padding: 6px 0;
+}
+
+.rewardlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rewardlist li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  margin-bottom: 5px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--surface-alt);
+  font-size: 12px;
+  font-weight: 700;
+  animation: reward-in 260ms ease-out backwards;
+}
+
+@keyframes reward-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tally {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 5px;
+}
+
+.tally__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  border-left: 3px solid var(--wood);
+  background: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 2px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(107, 69, 38, 0.25);
+}
+
+.stat b {
+  color: var(--gold-deep);
+}
+
+/* --------------------------------------------------------- small screens */
+
+@media (max-width: 860px) {
+  :root { --gap: 5px; --slot: 40px; }
+
+  body { font-size: 12px; }
+
+  /* Panel padding tightens rather than the (now hairline) border. */
+  .panel { padding: 4px 7px 6px; }
+  .panel__title { margin-bottom: 3px; font-size: 10px; }
+
+  .wallet { gap: 4px; }
+  .pill { min-width: 66px; height: 34px; font-size: 12px; }
+
+  /* Side panels are opt-in on a phone: the world matters more than the lists,
+     so they collapse and the Ranks / Online buttons bring them back. */
+  .side { display: none; }
+  .side.is-open { display: flex; }
+
+  /* One column, stacked bottom-up: bag, dials, chat. */
+  .hud {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto auto auto;
+    grid-template-areas:
+      "top"
+      "left"
+      "bag"
+      "dials"
+      "chat";
+  }
+
+  .side--right { grid-area: left; align-items: end; }
+
+  .dials { justify-self: stretch; }
+  /* The two panels share the row evenly rather than keeping desktop widths. */
+  .control { width: auto; flex: 1 1 0; }
+
+  .bagzone { justify-self: stretch; align-items: stretch; }
+  .iconbar { justify-content: center; flex-wrap: wrap; }
+  .bag { width: auto; }
+  .hud { --bag-cols: 6; --bag-rows: 1; }
+
+  .chat { width: auto; justify-self: stretch; }
+  .chat__log { height: 56px; }
+
+  .status { bottom: 50%; }
+}
+
+@media (max-width: 860px) and (min-width: 561px) {
+  .hud { --bag-cols: 8; }
+}
+
+/* On a phone the panel keeps the whole stake ladder -- every rung has to stay
+   reachable -- and gives up what it can say about the chosen one instead. The
+   read-out drops to the rung's name, which is the half that changes what the
+   player is looking at; the rest is still a tap-and-hold away in the chip's
+   own tooltip. */
+@media (max-width: 560px) {
+  .control__hint { display: none; }
+  .stakenote { font-size: 10px; margin-top: 3px; }
+  /* Same reasoning as the compact control bar above: one legible band beats
+     three truncated ones. */
+  .riskband { padding: 2px 4px; }
+  .riskband__name { font-size: 10px; }
+  .riskband:not([aria-current="true"]) { display: none; }
+
+  .stakerow__label { font-size: 9px; }
+  .chat__log { height: 44px; }
+  .chip { padding: 0 7px; font-size: 11px; min-height: 32px; }
+   .cast__track { height: 22px; }
+  .cast { padding-top: 2px; }
+  .cast__label { margin-bottom: 2px; font-size: 10px; }
+  .rodpanel { width: 76px; padding: 5px 6px; gap: 3px; }
+  .rodpanel__level { font-size: 11px; }
+  .rodpanel__cta { font-size: 9px; padding: 3px 4px; }
+}
+
+@media (max-height: 560px) {
+  .board { max-height: 26vh; }
+  .chat__log { height: 46px; }
+  .hud { --bag-rows: 1; }
+}
+
+/* Desktop always shows both side panels, so their toggles are redundant. */
+@media (min-width: 861px) {
+  .iconbtn--side { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --------------------------------------------------- harbor refresh -- */
+
+:root {
+  --night: #071426;
+  --ocean: #0e3857;
+  --seafoam: #8de0dc;
+  --panel-night: rgba(8, 24, 43, 0.94);
+  --panel-night-edge: rgba(130, 219, 210, 0.28);
+  --glow: 0 7px 20px rgba(0, 12, 28, 0.42);
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--seafoam);
+  outline-offset: 3px;
+}
+
+.gate {
+  background: radial-gradient(circle at 50% 32%, #16334d, #071426 78%);
+}
+
+.gate__card,
+.modal__card {
+  box-shadow: var(--glow);
+}
+
+.hud::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(1, 12, 28, 0.16), transparent 32%, transparent 72%, rgba(1, 12, 28, 0.24));
+}
+
+.hud .panel {
+  filter: drop-shadow(0 4px 9px rgba(0, 12, 29, 0.34));
+}
+
+.topbar {
+  position: relative;
+}
+
+.cast {
+  position: relative;
+  overflow: hidden;
+}
+
+.cast::after {
+  content: "";
+  position: absolute;
+  inset: auto -30% 3px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--seafoam), transparent);
+  opacity: 0.65;
+  animation: tide 3s linear infinite;
+}
+
+.cast__label::before {
+  content: "●";
+  color: var(--seafoam);
+  margin-right: 5px;
+  text-shadow: 0 0 8px var(--seafoam);
+}
+
+.pill { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.2)); }
+.pill b::after { content: ""; }
+
+.board { backdrop-filter: blur(2px); }
+.board__list li { padding: 2px 0; border-bottom: 1px solid rgba(107, 69, 38, 0.15); }
+.board__list li:first-child { color: var(--gold-deep); font-weight: 700; }
+
+.control { position: relative; }
+
+.chip {
+  position: relative;
+  letter-spacing: 0.03em;
+}
+.chip[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px rgba(255, 246, 186, 0.8), 0 0 11px rgba(245, 197, 66, 0.32);
+}
+.chip[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 30%;
+  right: 30%;
+  height: 2px;
+  background: #fff4aa;
+}
+
+.iconbar {
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(5, 21, 37, 0.78);
+  box-shadow: var(--glow);
+}
+.iconbtn { border-radius: 8px; }
+.iconbtn--active { filter: drop-shadow(0 0 8px rgba(141, 224, 220, 0.9)); }
+.iconbtn--active::after {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 7px;
+  margin: 3px auto 0;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 7px var(--live);
+}
+
+.bag { position: relative; }
+.bag::after {
+  content: "OPEN FIRST";
+  position: absolute;
+  right: 9px;
+  top: 4px;
+  color: var(--gold-deep);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+.bagslot:not(.bagslot--empty) { box-shadow: inset 0 0 10px rgba(255, 238, 142, 0.16); }
+.bagslot--tiered { animation: chest-ready 2.4s ease-in-out infinite; }
+
+.shoprow { position: relative; overflow: hidden; }
+.shoprow::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(var(--seafoam), var(--gold));
+}
+.shoprow__name { color: var(--wood-dark); }
+
+.journal-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgba(107, 69, 38, 0.25);
+}
+.journal-tab {
+  min-height: 30px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(107, 69, 38, 0.12);
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.journal-tab[aria-selected="true"] {
+  background: var(--wood);
+  color: var(--parchment);
+  box-shadow: inset 0 -2px 0 var(--gold);
+}
+.journal-content { padding-top: 2px; }
+
+.modal__scrim { backdrop-filter: blur(3px); }
+.modal__card { animation: modal-arrive 180ms ease-out; }
+
+@keyframes tide { from { transform: translateX(-12%); } to { transform: translateX(12%); } }
+@keyframes chest-ready { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); filter: brightness(1.08); } }
+@keyframes modal-arrive { from { opacity: 0; transform: translateY(9px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 860px) {
+  .hud { padding-bottom: calc(7px + var(--safe-bottom)); gap: 4px; }
+
+  .topbar { align-items: stretch; }
+  .wallet { justify-content: flex-end; }
+  .pill { min-width: 58px; }
+  .bag::after { content: "TAP TO OPEN"; }
+  .bagzone { order: 2; }
+  .dials { order: 3; }
+  .chat { order: 4; }
+  .side.is-open {
+    position: fixed;
+    z-index: 25;
+    left: 8px;
+    right: 8px;
+    bottom: calc(62px + var(--safe-bottom));
+    max-height: 58vh;
+    animation: sheet-rise 180ms ease-out;
+  }
+  .side .board { width: 100%; max-height: 54vh; }
+  .side--right { align-items: stretch; }
+}
+
+@media (max-width: 560px) {
+  .wallet { gap: 2px; }
+  .pill { min-width: 47px; padding-right: 1px; font-size: 11px; }
+  .journal-tab { font-size: 10px; }
+}
+
+@keyframes sheet-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+/* ----------------------------------------------------- chest opening -- */
+
+.chestopen {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/**
+ * The lit stage the chest sits on.
+ *
+ * Flat dark wood rather than the UI pack's 9-slice: that sprite is drawn for
+ * small panels, and stretching its middle across a box this size smeared the
+ * pattern. A plain shape also lets the rarity glow read, which is the only
+ * thing this panel needs to say. `--tier` is set per chest.
+ */
+.chestopen__stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 178px;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid var(--wood);
+  background:
+    radial-gradient(ellipse at 50% 58%, color-mix(in srgb, var(--tier) 55%, transparent), transparent 70%),
+    var(--wood-dark);
+}
+
+/* Everything on the stage shares one cell, so the ring, the sparkles and the
+   confetti sit behind and around the chest rather than pushing it off centre. */
+.chestopen__stage > * {
+  grid-area: 1 / 1;
+}
+
+.chestopen__chest {
+  position: relative;
+  z-index: 1;
+  animation: chest-idle 2.4s ease-in-out infinite;
+}
+
+/* Once the reel lands the stage holds the reward, which arrives rather than
+   idling -- the bob is what says "still closed". */
+.chestopen__stage--opened .wonframe {
+  animation: chest-won 420ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+@keyframes chest-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes chest-won {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/**
+ * The reel: a strip of item slots running past a centre marker.
+ *
+ * The band does not scroll and the track has no width -- `buildReel` keeps a
+ * pool of cards just wide enough to cover the band and moves the whole track
+ * by one composited transform per frame, painting each card from its virtual
+ * index. So there is no track length to run out of, and the strip is full at
+ * both edges at any window size.
+ */
+.reel {
+  /* Geometry, in one place. `--reel-card` + `--reel-gap` must equal the PITCH
+     constant in hud.js: the loop steps the strip by whole cards, and a card
+     that is not the width the loop thinks it is stops the reel between two. */
+  --reel-card: 48px;
+  --reel-gap: 8px;
+  --reel-band: 74px;
+
+  position: relative;
+  /* The marker overhangs the band, so the clipping lives one level in. */
+  overflow: visible;
+}
+
+.reel__view {
+  position: relative;
+  height: var(--reel-band);
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 240, 204, 0.16);
+  border-bottom: 1px solid rgba(255, 240, 204, 0.16);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 40%, rgba(0, 0, 0, 0.5)),
+    rgba(9, 7, 6, 0.88);
+}
+
+/* Absolute, so the pool's own width never sets the band's -- the track is
+   positioned entirely by the transform the loop writes to it. */
+.reel__track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--reel-gap);
+  will-change: transform;
+}
+
+/**
+ * The centre marker.
+ *
+ * Drawn past the band top and bottom rather than inside it, so it reads as a
+ * sight line the strip is passing under rather than as a divider between two
+ * cards, and capped with a diamond at the foot so the eye has something to
+ * fix on while the cards blur.
+ */
+.reel__marker {
+  position: absolute;
+  top: -22px;
+  bottom: -22px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    var(--gold) 16%,
+    var(--gold) 84%,
+    transparent
+  );
+  box-shadow: 0 0 8px rgba(245, 197, 66, 0.8);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.reel__marker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  background: var(--gold);
+  transform: rotate(45deg);
+  box-shadow: 0 0 7px rgba(245, 197, 66, 0.9);
+}
+
+/**
+ * One slot in the strip.
+ *
+ * Framed in the reward's own colour and notched the way the reveal frame is,
+ * so the card the marker stops over and the frame the reward arrives in read
+ * as the same fitting at two sizes. Icons only: the strip is moving far too
+ * fast to read, and a name under each one turned a row of items into a row of
+ * paragraphs.
+ *
+ * Built as a coloured plate with a darker one laid inside it rather than as a
+ * box with a border, because `clip-path` cuts the border off with everything
+ * else: a bordered box notched this way comes out with a bare diagonal across
+ * the corner, which is the one edge the shape exists to show. Two clipped
+ * layers put the colour on every edge including that one.
+ *
+ * Width and gap must total the PITCH `buildReel` steps by, or the reel stops
+ * between cards.
+ */
+.reelcard {
+  --reel-bevel: 8px;
+  --reel-notch: 13px;
+
+  flex: none;
+  box-sizing: border-box;
+  position: relative;
+  width: var(--reel-card);
+  height: var(--reel-card);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--tint) 88%, #241812);
+  clip-path: polygon(
+    0 var(--reel-bevel), var(--reel-bevel) 0,
+    calc(100% - var(--reel-notch)) 0, 100% var(--reel-notch),
+    100% calc(100% - var(--reel-bevel)), calc(100% - var(--reel-bevel)) 100%,
+    var(--reel-bevel) 100%, 0 calc(100% - var(--reel-bevel))
+  );
+}
+
+/* The dark plate the reward sits on, inset by the frame's own thickness. */
+.reelcard::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: color-mix(in srgb, var(--tint) 12%, rgba(6, 5, 4, 0.94));
+  clip-path: polygon(
+    0 7px, 7px 0, calc(100% - 11px) 0, 100% 11px,
+    100% calc(100% - 7px), calc(100% - 7px) 100%,
+    7px 100%, 0 calc(100% - 7px)
+  );
+}
+
+/* The slash across the corner the notch left square: two strokes, the detail
+   that stops the frame reading as a plain box at 48px. */
+.reelcard::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 17px;
+  height: 17px;
+  z-index: 2;
+  background:
+    linear-gradient(45deg, transparent 40%, var(--tint) 40%, var(--tint) 52%, transparent 52%),
+    linear-gradient(45deg, transparent 64%, var(--tint) 64%, var(--tint) 75%, transparent 75%);
+  pointer-events: none;
+}
+
+/* The artwork rides above both plates; without this the inner one covers it. */
+.reelcard > * {
+  position: relative;
+  z-index: 1;
+}
+
+/**
+ * Lit in its own colour once the strip has stopped on it, so the card under
+ * the marker is unmistakably the one that was won.
+ *
+ * The glow is a `drop-shadow` filter rather than a `box-shadow`, because the
+ * card is clipped: a box-shadow is drawn on the border box and clipped away
+ * with it, while a filter is applied to the clipped result and so follows the
+ * notched shape outward.
+ */
+.reelcard--won {
+  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--tint) 90%, transparent))
+          drop-shadow(0 0 20px color-mix(in srgb, var(--tint) 55%, transparent));
+}
+
+.reelcard--won::before {
+  background: color-mix(in srgb, var(--tint) 42%, rgba(6, 5, 4, 0.94));
+}
+
+/**
+ * The band leaving.
+ *
+ * It used to be taken out of the panel between one frame and the next, which
+ * read as a glitch: the strip was there, then the reward was. Collapsing it
+ * into the line the marker is already drawing hands the moment over instead --
+ * the band closes onto the winning card, and what is left is a bright rule
+ * that fades as the reward arrives on the stage behind it.
+ */
+.reel--closing .reel__view {
+  animation: reel-close 340ms cubic-bezier(0.5, 0, 0.75, 0) both;
+}
+
+.reel--closing .reel__marker {
+  animation: reel-marker-out 340ms ease-in both;
+}
+
+@keyframes reel-close {
+  from { transform: scaleY(1); filter: brightness(1); }
+  60%  { transform: scaleY(0.16); filter: brightness(2.4); }
+  to   { transform: scaleY(0.02); filter: brightness(3.4); opacity: 0; }
+}
+
+@keyframes reel-marker-out {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: scaleY(0.4); }
+}
+
+@keyframes spoil-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/**
+ * The chest's name written around it on a circle, turning slowly.
+ *
+ * Faint on purpose: it is there to make the unopened chest feel like it is
+ * being presented rather than sitting in a box, and anything brighter would
+ * compete with the sprite it is circling.
+ */
+.namering {
+  width: 168px;
+  height: 168px;
+  justify-self: center;
+  align-self: center;
+  fill: color-mix(in srgb, var(--tier) 62%, var(--parchment));
+  opacity: 0.5;
+  animation: ring-turn 26s linear infinite;
+}
+
+.namering text {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+@keyframes ring-turn {
+  to { transform: rotate(360deg); }
+}
+
+/* Glints drifting around the stage, each started at its own offset so they
+   never pulse in unison. */
+.sparkles {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.sparkles__one {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4px 0 0 -4px;
+  background: var(--parchment);
+  /* A four-pointed star: the arms pinch in at the waist, which is what tells
+     it apart from a plus sign at this size. */
+  clip-path: polygon(
+    50% 0%, 58% 42%, 100% 50%, 58% 58%,
+    50% 100%, 42% 58%, 0% 50%, 42% 42%
+  );
+  opacity: 0;
+  animation: sparkle 2.8s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 70%, 100% { opacity: 0; transform: scale(0.4) rotate(0); }
+  16% { opacity: 0.95; transform: scale(1) rotate(35deg); }
+  40% { opacity: 0.25; transform: scale(0.7) rotate(70deg); }
+}
+
+/* The burst at the moment the chest gives the reward up. One shot, no repeat:
+   it marks an event, and a looping burst would turn it into wallpaper. */
+.confetti {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.confetti__bit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  animation: confetti-fly 900ms cubic-bezier(0.15, 0.75, 0.35, 1) both;
+}
+
+@keyframes confetti-fly {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(0.4); }
+  to {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
+      rotate(var(--spin)) scale(1);
+  }
+}
+
+/**
+ * The reward under a frame in its own colour, notched at the corners so the
+ * frame reads as a fitting rather than a border. `--tint` is the reward's.
+ *
+ * The same two-plate build as a reel card, at four times the size and for the
+ * same reason -- `clip-path` would otherwise leave the notched corner as the
+ * one bare edge on the frame. Notched on the same corners too: the card the
+ * strip stopped on and the frame the reward arrives in are meant to read as
+ * one object growing, which they cannot do mirrored.
+ */
+.wonframe {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  background: var(--tint);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--tint) 80%, transparent))
+          drop-shadow(0 0 26px color-mix(in srgb, var(--tint) 45%, transparent));
+  clip-path: polygon(
+    0 15px, 15px 0, calc(100% - 26px) 0, 100% 26px,
+    100% calc(100% - 15px), calc(100% - 15px) 100%,
+    15px 100%, 0 calc(100% - 15px)
+  );
+}
+
+.wonframe::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  background: color-mix(in srgb, var(--tint) 11%, rgba(4, 3, 3, 0.92));
+  clip-path: polygon(
+    0 12px, 12px 0, calc(100% - 22px) 0, 100% 22px,
+    100% calc(100% - 12px), calc(100% - 12px) 100%,
+    12px 100%, 0 calc(100% - 12px)
+  );
+}
+
+.wonframe::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 34px;
+  height: 34px;
+  z-index: 2;
+  background:
+    linear-gradient(45deg, transparent 41%, var(--tint) 41%, var(--tint) 50%, transparent 50%),
+    linear-gradient(45deg, transparent 62%, var(--tint) 62%, var(--tint) 72%, transparent 72%);
+  pointer-events: none;
+}
+
+.wonframe > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* What was won, said in words under the frame. */
+.chestwon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+  animation: spoil-in 260ms ease-out both;
+}
+
+.chestwon__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.chestwon__blurb {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
+.chestwon__bonus {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #2f7f4f;
+}
+
+/* Everything this sitting has produced. Its job is to make opening six chests
+   read as one haul rather than as six panels that each forgot the last. */
+.haul {
+  border-top: 3px solid var(--wood);
+  padding-top: 8px;
+}
+
+.haul__title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink-soft);
+  letter-spacing: 0.4px;
+}
+
+.haul__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.haul__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--tint);
+  background: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  animation: spoil-in 220ms ease-out both;
+}
+
+.haul__art {
+  flex: 0 0 auto;
+}
+
+.haul__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.haul__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.haul__total {
+  margin: 6px 0 0;
+  font-size: 10px;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+/* What the tier can produce, shown before anything is spent. Types only --
+   there is no amount here and no ordering that could stand in for odds. */
+.maybe__title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink-soft);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.maybe__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* A cell with nothing drawn in it: the item is the whole of it, and the box is
+   only there to hold the row level, because the sheets snap to different whole
+   multiples inside the same asked-for square. Framing each one turned a hint
+   about one reward into a grid that looked like five items being handed over. */
+.maybe__slot {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+}
+
+/* The flat glyph reward -- XP -- carries the inline spacing every other icon
+   in the game wants, and here it would push the row off centre. */
+.maybe__slot .icon { margin: 0; }
+
+.chestopen__spin {
+  width: 100%;
+}
+
+/* Open fills the panel on its own, and shares the row with Close and Open all
+   once there is a stack to work through. Selectors carry the row, because
+   .chestopen__spin is 100% wide alone and that basis squeezes the others out. */
+.chestopen__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chestopen__actions > .chestopen__spin {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+/* Sized to its label and lettered softer: every button in this theme is the
+   same cream, so width and weight are what mark stopping as the lesser action. */
+.chestopen__actions > .chestopen__done {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+}
+
+/* Emptying the stack in one go is the bulk action, not the inviting one: it is
+   sized to its label and drawn flat, so Open keeps the eye. */
+.chestopen__actions > .chestopen__all {
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--gold) 42%, var(--parchment));
+  color: var(--ink-soft);
+}
+
+/**
+ * Having a gem appraised.
+ *
+ * The counter is the chest's lit stage split in two: the stone under the lamp
+ * on the left with its price called out over it, and the appraiser's grade
+ * sheet down the right. Both halves are on screen from the start -- the panel
+ * opens with every trait unread, and the reveal fills them in.
+ */
+.appraise {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The counter stays dark and the stone is what is lit on it. The tier colour
+   is a halo close around the gem rather than a wash over the whole panel --
+   at a bright tier like Citrine a wash turned the counter, the labels and the
+   grades all one colour, and the thing being appraised stopped standing out. */
+.appraise__counter {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 168px;
+  padding: 14px;
+  border: 1px solid var(--wood);
+  background:
+    radial-gradient(circle at 31% 50%,
+      color-mix(in srgb, var(--tier) 30%, transparent), transparent 52%),
+    linear-gradient(rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.34)),
+    var(--wood-dark);
+}
+
+.appraise__stone {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+/* The stone grows as it is graded. `--graded` counts the traits read so far,
+   so the swelling is driven by the reveal rather than by a timer of its own --
+   which is what keeps it in step when a grade lands late or not at all.
+
+   The scale lives here and not on the sprite because the sprite is running the
+   idle bob, and a transform there would be overwritten by those keyframes. */
+.appraise__gembox {
+  display: grid;
+  place-items: center;
+  transform: scale(calc(1 + var(--graded, 0) * 0.055));
+  transition: transform 260ms cubic-bezier(0.2, 1.4, 0.4, 1);
+  filter: drop-shadow(0 0 calc(4px + var(--graded, 0) * 4px)
+    color-mix(in srgb, var(--tier) 70%, transparent));
+}
+
+.appraise__gem {
+  animation: chest-idle 2.4s ease-in-out infinite;
+}
+
+/* Once the last trait is graded the stone stops idling and presents itself:
+   the price beside it is final, so the bob has nothing left to promise.
+
+   Not the chest's arrival pop, which starts from nothing -- this gem has been
+   on the counter the whole time, so it swells and settles instead. */
+.appraise__gembox--valued {
+  animation: gem-valued 460ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes gem-valued {
+  0% { transform: scale(1.22); }
+  45% { transform: scale(1.36) rotate(-3deg); }
+  100% { transform: scale(1.26) rotate(0); }
+}
+
+/* The price is called over the stone rather than under it, so the number and
+   the thing it values are one object. Dark shadow, because it has to stay
+   legible over both the lit centre and the unlit corners of the gem. */
+.appraise__price {
+  position: absolute;
+  font-size: 27px;
+  font-weight: 700;
+  color: #fff;
+  /* Outlined rather than shadowed: it sits over a bright gem face, and a soft
+     shadow alone left the light strokes of the digits disappearing into it. */
+  text-shadow:
+    -2px 0 0 rgba(0, 0, 0, 0.7), 2px 0 0 rgba(0, 0, 0, 0.7),
+    0 -2px 0 rgba(0, 0, 0, 0.7), 0 3px 0 rgba(0, 0, 0, 0.7),
+    0 0 12px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* Each new figure lands rather than fades, so a rising price is felt as a
+   series of steps -- one per trait -- instead of a smooth count. */
+.appraise__price--counting {
+  animation: price-step 220ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+.appraise__price--final {
+  color: #fff3cd;
+}
+
+@keyframes price-step {
+  from { transform: scale(1.28); }
+  to { transform: scale(1); }
+}
+
+/* What the tier is worth, on the stone rather than in a line of small print
+   below it: the range is the stakes, so it sits on the thing being staked.
+   Quoted in dollars, like the price above it -- the two being the same money
+   is what lets a player read a good roll off the panel without arithmetic.
+
+   Pinned to the foot of the stone so it stays clear of the price called over
+   the gem's face, and dimmer than that price: this is the frame, not the
+   figure. */
+.appraise__range {
+  position: absolute;
+  bottom: 0;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--tier) 55%, transparent);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.42);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The two ends of the range are the numbers being compared against; the dash
+   between them is not. */
+.appraise__range span {
+  font-weight: 700;
+  color: #fff;
+}
+
+.appraise__sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+/* "Purity: B" as one phrase, left-aligned, rather than a label and a value
+   pushed to opposite edges. Four of those read as a table of figures; this
+   reads as the appraiser telling you what he found. */
+.appraise__trait {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  overflow: hidden;
+}
+
+.appraise__trait dt {
+  font-size: 15px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--parchment) 82%, transparent);
+}
+
+/* An unread trait dims its label as well as its value -- the row is there so
+   the player can see how many are still to come, not to be read yet. */
+.appraise__trait:not(.appraise__trait--graded):not(.appraise__trait--reading) dt {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.appraise__grade {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* The row under the loupe: a band held across it for as long as the appraiser
+   is on it, brightest where the label is. It says "working on this one" -- so
+   it stays put rather than sweeping past and leaving the row looking done. */
+.appraise__trait--reading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--gold) 55%, transparent),
+    color-mix(in srgb, var(--gold) 22%, transparent) 62%,
+    transparent
+  );
+  animation: grade-reading 460ms ease-out both;
+}
+
+@keyframes grade-reading {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.appraise__trait--graded .appraise__grade {
+  animation: grade-landed 240ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+@keyframes grade-landed {
+  from { transform: scale(1.5); opacity: 0.2; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* What is actually on the counter, and what this tier is known to fetch. The
+   range is the stakes: it is why an S on the last trait is worth waiting for. */
+.appraise__ticket {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-left: 3px solid var(--wood);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.appraise__ticket-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.appraise__ticket-text b {
+  font-size: 12px;
+}
+
+.appraise__ticket-text span {
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+/* The counter's foot: the action, and the one setting that changes how it is
+   played. Set off from the panel above so the button reads as the thing to do
+   next rather than as another row of the receipt. */
+.appraise__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 2px -2px -2px;
+  padding: 10px 10px 8px;
+  border-top: 2px solid var(--wood);
+  background: rgba(0, 0, 0, 0.13);
+}
+
+.appraise__foot .chestopen__spin { width: 100%; }
+
+.appraise__quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.appraise__quick input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--gold-deep, #a8763f);
+  cursor: pointer;
+}
+
+/* Brighter than the Appraise button it replaces: taking the money is the one
+   thing left to do on this panel. */
+.appraise__claim {
+  background: #ffd979;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 60%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chestopen__chest,
+  .chestwon,
+  .haul__row,
+  .chestopen__stage--opened .wonframe { animation: none; }
+  /* The strip is driven by rAF, not a transition, so there is nothing here to
+     shorten -- hud.js reads the same preference and cuts the spin to a brief
+     settle. What is left to do is stop the band folding away. */
+  .reel--closing .reel__view,
+  .reel--closing .reel__marker { animation: none; opacity: 0; }
+
+  /* The ring stops turning and the burst never flies: both are pure motion
+     with nothing to say, and the panel loses nothing by holding still. The
+     sparkles go entirely, rather than freezing mid-fade as specks of dirt. */
+  .namering { animation: none; }
+  /* The waiting button keeps its ring, held still -- it is a state marker, not
+     an animation, and a still ring still says the click landed. */
+  .btn.is-busy::before { animation: none; }
+  .sparkles,
+  .confetti { display: none; }
+  /* No sweep and no pop: the grades still arrive one at a time, and the letter
+     appearing in the row is the whole message. */
+  .appraise__gem,
+  .appraise__gembox--valued,
+  .appraise__price--counting,
+  .appraise__trait--reading::after,
+  .appraise__trait--graded .appraise__grade { animation: none; }
+
+  /* The band still marks the row being read, it just arrives rather than
+     slides; the stone still grows, it just steps instead of easing. */
+  .appraise__trait--reading::after { opacity: 1; transform: none; }
+  .appraise__gembox { transition: none; }
+}
+
+/* ------------------------------------------------ cozy harbor theme -- */
+
+/* The HUD stays deliberately flat: the harbor supplies the visual texture,
+   while UI surfaces use broad walnut and parchment planes that are easy to
+   scan at a glance. */
+:root {
+  --ink: #382519;
+  --ink-soft: #74523a;
+  --parchment: #f2dfbb;
+  --gold: #e6b84e;
+  --gold-deep: #9c6428;
+  --wood: #77502f;
+  --wood-dark: #3d281b;
+  --seafoam: #a9d9b7;
+}
+
+.gate {
+  background: radial-gradient(circle at 50% 32%, #4a3520, #241608 78%);
+}
+
+.hud::before {
+  background: linear-gradient(180deg, rgba(86, 56, 28, 0.13), transparent 31%, transparent 72%, rgba(57, 35, 18, 0.16));
+}
+
+.hud .panel {
+  filter: drop-shadow(0 3px 7px rgba(56, 35, 18, 0.28));
+}
+
+/* Two independent cards leave the middle of the top edge open for the world. */
+.topbar {
+  align-items: start;
+  gap: 14px;
+}
+
+.wallet {
+  width: auto;
+  min-height: 50px;
+  padding: 4px 6px 5px;
+  justify-self: end;
+  gap: 5px;
+  background: linear-gradient(135deg, rgba(255, 248, 222, 0.2), transparent 70%);
+}
+
+.wallet .pill {
+  min-width: 69px;
+  filter: none;
+}
+
+.cast__fill { background: linear-gradient(90deg, #6da8a6, #b0d9b4); }
+
+.cast::after { display: none; }
+.cast__label::before { color: #b08248; text-shadow: none; }
+
+.board,
+.chat,
+.bag,
+.control,
+.cast {
+  backdrop-filter: none;
+}
+
+.board__list li { border-bottom-color: rgba(116, 82, 58, 0.17); }
+.board__list li:first-child { color: var(--gold-deep); }
+
+.iconbar {
+  padding: 3px;
+  border-radius: 7px;
+  background: rgba(94, 61, 35, 0.48);
+  box-shadow: 0 2px 5px rgba(56, 35, 18, 0.24);
+}
+
+.iconbtn--active { filter: drop-shadow(0 0 5px rgba(230, 184, 78, 0.55)); }
+
+.chip[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px rgba(255, 247, 198, 0.72);
+}
+
+.bag::after { color: #a26e30; }
+.bagslot:not(.bagslot--empty) { box-shadow: none; }
+.bagslot--tiered { animation: none; }
+
+.shoprow::before { background: #bf9653; }
+.shoprow__buy:not(:disabled) { box-shadow: none; }
+
+.journal-tab[aria-selected="true"] {
+  background: #795231;
+  color: #fff3d5;
+  box-shadow: inset 0 -2px 0 #d7ae5d;
+}
+
+.modal__scrim { backdrop-filter: blur(2px); }
+
+@media (max-width: 860px) {
+  .topbar { gap: 5px; }
+
+  .wallet { min-height: 42px; padding: 2px 3px; }
+  .wallet .pill { min-width: 48px; }
+}
+
+@media (max-width: 560px) {
+
+  .wallet .pill { min-width: 39px; }
+}
+
+/* Flat cozy surfaces: parchment cards, walnut controls, no texture behind
+   either. Item sprites are untouched. */
+.hud .panel,
+.modal__card,
+.gate__card {
+  border: 1px solid rgba(52, 31, 17, 0.55);
+  border-radius: 9px;
+  background: #f1e2c2;
+  box-shadow: 0 3px 10px rgba(57, 35, 18, 0.26);
+}
+
+.hud .control,
+.hud .cast,
+.hud .wallet,
+.hud .rodpanel {
+  color: #fff1cd;
+  border-color: #402719;
+  background: #6d4a2c;
+  box-shadow: 0 3px 10px rgba(57, 35, 18, 0.26);
+}
+
+.hud .control .panel__title,
+.cast__label,
+.control__hint { color: #fff1cd; }
+
+.btn,
+.chip {
+  border: 1px solid #604025;
+  border-radius: 6px;
+  background: #e7cd97;
+  box-shadow: none;
+}
+
+.chip {
+  color: #5a371f;
+  min-height: 34px;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: #7a4d22;
+  color: #fff9da;
+  background: #7a4d22;
+  box-shadow: none;
+}
+
+.cast__track {
+  border: 1px solid #4d301c;
+  border-radius: 5px;
+  background: rgba(52, 32, 18, 0.72);
+}
+
+.bagslot {
+  border: 1px solid #76502f;
+  border-radius: 5px;
+  background: #eddcb8;
+  box-shadow: none;
+}
+
+.bagslot--empty { opacity: 0.58; }
+
+.modal__card { color: var(--ink); }
+
+@media (max-width: 860px) {
+  .hud .panel { border-width: 1px; }
+}
+
+/* ------------------------------------------------ harbor HUD composition --
+   A compact wood-and-parchment arrangement inspired by classic pixel fishing
+   games.  This is intentionally presentation-only: HUD ids and event targets
+   remain the same so the live harbor, controls and multiplayer state keep
+   their existing wiring. */
+.hud {
+  --gap: 10px;
+
+  /* The panel around the grid, measured from the same four numbers the grid
+     is. Declared here rather than on :root because a custom property is
+     substituted with the values on the element that declares it, and every
+     breakpoint sets the slot knobs on .hud -- left at :root this would have
+     kept quoting the 46px default back at a 56px grid.
+
+     `--bag-border` is the fourth number as of the wood/parchment nine-slice
+     pass: `.bag` now carries an 18px `border-image` (14px at the ≤860px
+     tier below), and box-sizing:border-box means that border eats into the
+     same width this reserves for the grid. Forgetting it here is exactly
+     what squeezed the grid columns narrower than `--bag-slot` while the
+     rows stayed fixed-height -- non-square slots. */
+  --bag-border: 18px;
+  --bag-width: calc(
+    var(--bag-cols) * var(--bag-slot)
+    + (var(--bag-cols) - 1) * var(--bag-gap)
+    + 2 * var(--bag-pad) + 2 * var(--bag-border) + 2px
+  );
+
+  padding: calc(10px + var(--safe-top)) 12px calc(10px + var(--safe-bottom));
+  grid-template-columns: minmax(168px, 0.6fr) minmax(320px, 1.8fr) minmax(178px, 0.64fr);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "top top top"
+    "left . right"
+    "chat dials bag";
+  gap: 8px 12px;
+}
+
+.hud .panel,
+.hud .wallet {
+  border: 1px solid rgba(52, 31, 17, .6);
+  border-radius: 10px;
+  background: #f1e2c2;
+  box-shadow: 0 2px 6px rgba(37, 24, 15, .25);
+}
+
+.hud .wallet,
+.hud .control,
+.hud .cast,
+.hud .rodpanel {
+  background: #6d4a2c;
+  color: #fff0cc;
+}
+
+.topbar { align-items: start; }
+
+.wallet { min-height: 50px; padding: 6px 8px; gap: 6px; }
+.wallet .pill { min-width: 74px; height: 30px; font-size: 14px; color: #fff0cc; border-color: #3f2717; background: #7c552f; }
+
+.side { padding-top: 8px; }
+.board { width: min(196px, 22vw); max-height: min(27vh, 200px); padding: 8px 10px 9px; }
+.side--right .board { width: min(192px, 22vw); }
+.panel__title { color: #4c301d; font-size: 13px; letter-spacing: 0; text-transform: none; padding-bottom: 4px; border-bottom: 1px solid rgba(100, 58, 29, .3); }
+.board__list { font-size: 12px; padding-left: 17px; }
+.board__list--plain { padding-left: 0; }
+.board__list li { margin-bottom: 4px; padding-bottom: 3px; }
+.board__sub { font-size: 11px; }
+.dot { width: 8px; height: 8px; border: 0; }
+
+.chat { width: min(250px, 24vw); padding: 8px 10px; gap: 5px; }
+.chat__toggle { color: #4d301e; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.chat__log { height: 64px; font-size: 12px; }
+.chat__input { min-height: 28px; font-size: 12px; }
+.btn--send { min-width: 34px; font-size: 0; }
+.btn--send::after { content: "➤"; font-size: 13px; }
+
+.dials { gap: 6px; width: min(600px, 52vw); }
+.cast { width: min(330px, 72%); align-self: center; padding: 6px 14px; text-align: center; }
+.cast__label { color: #fff0cc; font-size: 14px; text-transform: none; letter-spacing: 0; margin-bottom: 4px; }
+.cast__track { height: 16px; border-width: 1px; border-radius: 4px; }
+.cast__fill { background: linear-gradient(90deg, #6dac75, #b9df94); }
+.dials__row { gap: 6px; }
+
+/* The Stake -- the game's one risk lever -- in a dark panel: the ladder as a
+   chip row, with a line under it saying what the chosen rung trades. Dropping
+   the title and the full hint (now a hover tooltip, see `panel-stake`'s
+   title) is what lets this stay a slim strip beside the rod badge instead of
+   the row's whole width. */
+.control { min-height: 60px; padding: 7px 9px; }
+
+/* The lit band is ringed in the same gold as the chosen stake chip, so the
+   eye reads "this stake, therefore this band" as one statement rather than
+   two separate highlights. */
+.riskband {
+  border: 2px solid #4a2f1d;
+  border-radius: 8px;
+  background: #2c1d13;
+}
+.riskband__name { color: #fff0cc; }
+
+.riskband[aria-current="true"] {
+  border-color: #e5bd63;
+  background: #3b2717;
+}
+.riskband[aria-current="true"] .riskband__name { color: #ffe6a8; }
+
+/* The read-out is deliberately quieter than the chips: it explains the choice
+   rather than being part of it, so it must not compete with the gold ring
+   marking which rung is live. */
+.stakenote { color: #c9ab84; }
+
+.stakerow__label { color: #c2a179; }
+.chiprow { gap: 4px; }
+
+/* Stake chips are the same dark slab as the cards, one size down. Gold marks
+   the chosen one, matching the card above it rather than inventing a second
+   way of saying "this is the one". */
+.chip {
+  min-height: 28px;
+  padding: 0 9px;
+  flex: 0 0 auto;
+  border: 2px solid #4a2f1d;
+  border-radius: 6px;
+  background: #2c1d13;
+  color: #e2c79c;
+  font-size: 13px;
+  box-shadow: none;
+}
+.chip[aria-pressed="true"] {
+  border-color: #e5bd63;
+  background: #3b2717;
+  color: #ffe6a8;
+  box-shadow: none;
+}
+
+.control__hint {
+  color: #a98a64;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: left;
+  margin-top: 8px;
+}
+
+/* The rod badge matches the stake chips' own dark slab for its track, and
+   glows the same gold used everywhere else here for "this is the one" --
+   levelling up reads as the same kind of event as picking a stake. */
+.rodpanel { border-radius: 10px; }
+.rodpanel__level { color: #fff0cc; }
+.rodpanel__track {
+  border: 1px solid #4a2f1d;
+  background: #2c1d13;
+}
+.rodpanel__fill { background: linear-gradient(90deg, var(--gold-deep), var(--gold)); }
+.rodpanel__cta {
+  border: 2px solid #a3771f;
+  background: var(--gold);
+  color: #3d2506;
+}
+.rodpanel__cta:hover { filter: brightness(1.1); }
+
+.bagzone { gap: 6px; }
+.iconbar { gap: 6px; padding: 0; background: none; box-shadow: none; }
+.iconbtn { width: 50px; height: 50px; border: 1px solid #4c2d1b; border-radius: 8px; background: #714722; box-shadow: 0 2px 5px rgba(42, 23, 13, .3); }
+.iconbtn__label { font-size: 11px; }
+.bag { width: var(--bag-width); padding: 8px var(--bag-pad) var(--bag-pad); }
+.bag::after { display: none; }
+.bagslot { border: 1px solid #79502f; border-radius: 6px; background: rgba(127, 77, 37, .15); }
+
+/* ------------------------------------------------------- HUD scale steps --
+   The chrome above is drawn at one fixed size, tuned on a ~1280px window. On
+   anything wider it does not grow with the room it is given: on a 1440p screen
+   the whole HUD retreats into the corners and the bag -- the panel a player
+   reads most often -- ends up a two-row strip of five slots.
+
+   These steps give the size back. They are steps rather than a fluid clamp()
+   because the slots hold pixel art: a sprite enlarged by a fraction lands half
+   a source pixel off the grid and goes soft, so each rung is a size the sheets
+   are actually drawn to.
+
+   Everything here is scoped above the phone breakpoints further down, which
+   keep their own single-row bag. */
+@media (min-width: 1001px) {
+  .hud {
+    --bag-slot: 44px;
+    --bag-gap: 5px;
+    --bag-art: 0.8;
+
+    /* Both side columns reserve the bag's width, so the two stay symmetrical
+       and the dials keep the middle of the window. Sizing only the right-hand
+       one moved the dials off centre by half the bag at every step. */
+    grid-template-columns:
+      minmax(var(--bag-width), 0.8fr)
+      minmax(320px, 1.8fr)
+      minmax(var(--bag-width), 0.8fr);
+  }
+
+  /* The glyph consumables fall back to has no sprite to scale, so it takes the
+     slot's measure directly. The base `.bagslot__art` rule already applies
+     `scale(var(--bag-art))` at every breakpoint, so this tier only needs to
+     resize the glyph's own box. */
+  .bagslot__art:not(.sprite) { width: 32px; height: 32px; font-size: 23px; }
+
+  .bagslot__count { min-width: 18px; font-size: 12px; line-height: 17px; }
+}
+
+@media (min-width: 1280px) {
+  .hud { --bag-slot: 50px; --bag-gap: 6px; --bag-art: 0.9; }
+}
+
+@media (min-width: 1440px) {
+  .hud { --bag-slot: 56px; --bag-art: 1; }
+
+
+  .wallet { min-height: 56px; padding: 7px 9px; gap: 7px; }
+  .wallet .pill { min-width: 86px; height: 34px; font-size: 15px; }
+
+  .board, .side--right .board { width: min(224px, 16vw); max-height: min(30vh, 260px); }
+  .panel__title { font-size: 14px; }
+  .board__list { font-size: 13px; }
+  .board__sub { font-size: 12px; }
+
+  .chat { width: min(300px, 20vw); }
+  .chat__toggle { font-size: 13px; }
+  .chat__log { height: 84px; font-size: 13px; }
+  .chat__input { min-height: 32px; font-size: 13px; }
+
+  .cast { padding: 7px 16px; }
+  .cast__label { font-size: 15px; }
+  .cast__track { height: 18px; }
+  .control { min-height: 66px; padding: 8px 10px; }
+
+  .chip { min-height: 32px; padding: 0 11px; font-size: 14px; }
+  .stakerow__label { font-size: 11px; }
+  .control__hint { font-size: 11px; }
+
+  .rodpanel { width: 124px; padding: 9px 11px; }
+  .rodpanel__level { font-size: 14px; }
+  .rodpanel__cta { font-size: 11px; padding: 4px 8px; }
+
+  .iconbtn { width: 56px; height: 56px; }
+  .iconbtn__label { font-size: 12px; }
+}
+
+@media (min-width: 1760px) {
+  .hud { --bag-slot: 62px; --bag-gap: 7px; --bag-art: 1.1; }
+
+
+  .wallet .pill { min-width: 96px; height: 38px; font-size: 16px; }
+  .board, .side--right .board { width: min(248px, 15vw); }
+  .chat { width: min(330px, 19vw); }
+  .chat__log { height: 100px; }
+  .iconbtn { width: 62px; height: 62px; }
+}
+
+/* Capped by the middle column rather than by a slice of the viewport: with the
+   side columns now reserving a real width, a vw-sized control panel overhung
+   the bag on a 1024px window. */
+@media (min-width: 861px) {
+  .dials { width: min(640px, 100%); }
+}
+
+/* How many rows are on show, decided in one place after every width step so a
+   short window always has the last word.
+
+   Five is the whole bag: the grid draws 25 slots, so five rows is also the
+   count that keeps a scrollbar out of it -- dropping a row costs a few pixels
+   of column width to the scroll track. That is why these thresholds sit as low
+   as the arithmetic allows rather than at round numbers. Below 861px the phone
+   layout takes over with its own single row. */
+@media (min-width: 861px) {
+  .hud { --bag-rows: 5; }
+}
+
+@media (min-width: 861px) and (max-height: 680px) {
+  .hud { --bag-rows: 4; }
+}
+
+@media (min-width: 861px) and (max-height: 580px) {
+  .hud { --bag-rows: 3; }
+}
+
+@media (min-width: 861px) and (max-height: 480px) {
+  .hud { --bag-rows: 2; }
+}
+
+/* The chandlery, in the same wood-and-parchment terms as the rest of the HUD.
+   The shelf borrows the bag's slot exactly -- the two are read the same way,
+   and a shop slot that looked like anything else would be a second visual
+   language for "an item in a box". */
+.shopslot { border: 1px solid #79502f; border-radius: 6px; background: rgba(127, 77, 37, .15); }
+.shopslot.is-selected { border-color: #e5bd63; background: rgba(229, 189, 99, .22); }
+.shopslot__stock { color: #6b4526; }
+.shopslot__price { color: #4c301d; }
+
+.shopslot__bundle { color: #9c6428; }
+.shop__detail { border: 1px solid rgba(100, 58, 29, .45); background: rgba(255, 249, 233, .6); }
+.shop__detailart { border: 1px solid #79502f; background: rgba(127, 77, 37, .15); }
+.shopamount__card { border: 1px solid #79502f; background: #fdf6e6; }
+.shopamount__art { border: 1px solid #79502f; background: rgba(127, 77, 37, .15); }
+
+/* Cancel and Accept are the only two buttons in the HUD that must not read as
+   the same action, so they leave the shared parchment button behind: the one
+   that spends is green, the one that walks away is not. */
+.shop__cancel { border-color: #7c4b2a; background: #c9a877; color: #3f2611; }
+.shop__accept { border-color: #3f6b34; background: #52843f; color: #f4ffe9; }
+.shop__accept--gold { border-color: #9c6428; background: #e6b84e; color: #3d2506; }
+.shopamount__cancel { border-color: #7c4b2a; background: #c9a877; color: #3f2611; }
+.shopamount__set { border-color: #3f6b34; background: #52843f; color: #f4ffe9; }
+
+@media (max-width: 1000px) {
+  .hud { --gap: 8px; padding: calc(9px + var(--safe-top)) 10px calc(8px + var(--safe-bottom)); grid-template-columns: minmax(var(--bag-width), .7fr) minmax(330px, 1.35fr) minmax(var(--bag-width), .75fr); }
+
+
+  .wallet { min-height: 44px; padding: 5px 6px; gap: 4px; } .wallet .pill { min-width: 62px; height: 27px; font-size: 13px; }
+  .board, .side--right .board { width: min(168px, 24vw); } .panel__title { font-size: 12px; } .board__list { font-size: 12px; } .board__sub { font-size: 11px; }
+  .cast__label { font-size: 13px; } .control { min-height: 50px; padding: 6px 8px; } .chiprow { gap: 3px; } .chip { min-height: 28px; font-size: 11px; } .control__hint { font-size: 11px; }
+  .rodpanel { width: 92px; padding: 6px 8px; }
+  .rodpanel__level { font-size: 12px; }
+  .rodpanel__cta { font-size: 9px; padding: 3px 5px; }
+  .iconbtn { width: 44px; height: 44px; } .iconbtn__label { font-size: 11px; }
+  .hud { --bag-slot: 42px; --bag-gap: 4px; --bag-pad: 8px; --bag-art: 0.8; }
+}
+
+@media (max-width: 860px) {
+  /* The "harbor HUD composition" block above sets the desktop 3-column grid
+     unconditionally, so it wins over the base theme's single-column phone
+     layout even under 860px unless restated here, later in the cascade. */
+  .hud {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto auto auto;
+    grid-template-areas:
+      "top"
+      "left"
+      "bag"
+      "dials"
+      "chat";
+  }
+
+  .dials { width: 100%; justify-self: stretch; }
+  .chat { width: min(300px, 41vw); }
+  /* One wide row across the bottom, so the grid sets the width, not the calc. */
+  .bag { width: auto; }
+}
+
+/* ------------------------------------------------ Robin's Club gate --
+   The gate is the "Robin's Club" scene filling the whole viewport, with the
+   name input and Start button floating on its blank signboard -- no separate
+   background photo, angler overlay, or card-shell panel layered on top of it
+   the way earlier versions had.
+
+   `.gate__card` stays locked to the artwork's own aspect ratio (1672/941),
+   but is now sized to COVER the viewport rather than fit inside it: whichever
+   of width/height would otherwise leave a gap is grown past 100%, and the
+   overflow is what `.gate`'s `overflow: hidden` trims away -- never the art
+   itself, so it's never stretched. Because the box is still the image's own
+   coordinate space just partly off-screen, every child's percentage position
+   below stays pixel-accurate to the art regardless of viewport shape. */
+
+.gate {
+  isolation: isolate;
+  overflow: hidden;
+  padding: 0;
+  background: #1d3355;
+}
+
+.gate__card {
+  position: absolute;
+  z-index: 1;
+  /* Cover-fit math, done by hand instead of via `background-size: cover` so
+     the box itself keeps the art's coordinate space for the children below.
+     Exactly one axis ends up with zero slack (pinned edge-to-edge already,
+     same as `100vw`/`100vh` alone); the other gets whatever overflow cover
+     requires, and only THAT slack is redistributed by the anchor below --
+     using `100vw`/`100vh` untouched when there's no slack, same as
+     `background-position` would, so no viewport shape can ever leave a gap. */
+  --card-w: max(100vw, calc(100vh * 1.77683));
+  --card-h: calc(var(--card-w) / 1.77683);
+  width: var(--card-w);
+  height: var(--card-h);
+  /* Anchored at 70.1% across / 54.1% down -- the centre of the blank
+     signboard in the current artwork -- rather than the art's true centre,
+     so a narrow/portrait viewport's crop favours keeping the signboard (and
+     the input/button on it) in frame instead of losing part of it. Re-derive
+     these two numbers any time the art's sign moves or resizes. */
+  left: calc((100vw - var(--card-w)) * 0.7033);
+  top: calc((100vh - var(--card-h)) * 0.5305);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: url("/assets/login/anglers-club/robins-club-hero.png") center / 100% 100% no-repeat;
+  box-shadow: none;
+  color: #4a2c17;
+}
+
+/* The art already carries the "Robin's Club" title on the signboard, so the
+   DOM copies of the title/subtitle/field label stay available to assistive
+   technology without also being drawn on screen. */
+.gate__title,
+.gate__blurb,
+.gate__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Every position below is a percentage of the signboard scene (1672x941),
+   lined up with the blank parchment area below the title. This artwork's
+   sign is short and wide again (safe blank content zone roughly x 58.9-
+   81.8%, y 41.8-64.7% -- title band sits above it, roughly y 27-40%) --
+   pills are sized off their own natural aspect ratio (not stretched to the
+   blank width) and centred horizontally at 70.3%, stacked with modest gaps
+   rather than stretched full-width the way the previous, taller sign
+   allowed. Because `.gate__card` is locked to the art's aspect ratio, these
+   percentages stay correct at any size. */
+
+.gate__input {
+  position: absolute;
+  top: 43.2%;
+  left: 59.48%;
+  width: 21.7%;
+  height: 6%;
+  min-height: 0;
+  /* Plain `%` padding resolves against the containing block's (huge,
+     cover-fit) width, not this pill's own, and `em` padding is capped by
+     font-size's `vh`-based clamp, which stops growing on very wide
+     viewports while the pill (sized as a % of the cover-fit card,
+     effectively `vw`-driven there) keeps growing -- on an ultrawide
+     viewport the baked-in leaf icon then outgrows an `em` clearance and
+     overlaps the placeholder text. (A `container-type: inline-size` +
+     `cqw` fix was tried here first; it doesn't work without a wrapper
+     element, because an element can't be its own query container for its
+     own properties -- `cqw` on `.gate__input` fell back to resolving
+     against the viewport instead.) Deriving the padding directly from
+     `--card-w` (this pill's width is a fixed 21.7% of it) instead keeps it
+     an exact, robust fraction of the pill's own rendered width at any
+     viewport shape: the leaf sits at roughly 4.9-11.7% of the pill's width
+     in the source art, so 15% (of the pill, i.e. 0.217 * 0.15 of --card-w)
+     clears it with margin. */
+  padding: 0 calc(var(--card-w) * 0.00868) 0 calc(var(--card-w) * 0.03255);
+  border: 0;
+  border-radius: 999px;
+  outline: 0;
+  /* The base-theme `.gate__card` rule earlier in this file sets
+     `text-align: center`, which cascades down into this input's own text;
+     left-aligned is what actually reads correctly next to the icon baked
+     into the pill art, especially now the pill can get very wide. */
+  text-align: left;
+  background: url("/assets/login/anglers-club/display-name-input-tight.png") center / 100% 100% no-repeat;
+  color: #4a2c17;
+  /* `vh`, not `vw` -- this pill's own height tracks `.gate__card`'s cover-fit
+     height, which is pinned to (or close to) `100vh` for most viewport
+     shapes, so sizing the font off viewport height keeps text proportional
+     to the pill even on a tall, narrow phone (where `vw` alone would shrink
+     the font far more than the pill actually shrinks, leaving text crowded
+     against the pill's leaf icon). */
+  font-size: clamp(12px, 1.8vh, 18px);
+  font-weight: 700;
+}
+
+.gate__input:focus {
+  outline: 3px solid rgba(65, 132, 116, 0.8);
+  outline-offset: 2px;
+}
+
+.gate__error {
+  position: absolute;
+  top: 49.4%;
+  left: 58.33%;
+  width: 24%;
+  min-height: 0;
+  margin: 0;
+  color: #a33027;
+  font-size: clamp(9px, 1.2vh, 12px);
+  line-height: 1.15;
+  text-align: center;
+  text-shadow: 0 1px #fff1cc;
+}
+
+.gate__start {
+  position: absolute;
+  top: 51.8%;
+  left: 59.48%;
+  width: 21.7%;
+  height: 6.4%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* `em`, not `%` -- see the note on `.gate__input`'s padding above. */
+  padding: 0 0.9em;
+  border: 0;
+  border-radius: 999px;
+  background: url("/assets/login/anglers-club/primary-button-tight.png") center / 100% 100% no-repeat;
+  box-shadow: none;
+  color: #fff8dc;
+  font-size: clamp(11px, 1.62vh, 17px);
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 0 rgba(100, 52, 7, 0.46);
+}
+
+.gate__start:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.gate__start:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+/* Earlier versions baked the returning-session affordance into the card art
+   and kept these controls screen-reader-only. The new artwork has no such
+   affordance drawn in, so a returning player needs to actually see these. */
+.gate__returning {
+  position: absolute;
+  top: 58.8%;
+  left: 58.33%;
+  width: 24%;
+  margin: 0;
+  color: #4a2c17;
+  font-size: clamp(9px, 1.2vh, 12px);
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: 0 1px #fff1cc;
+}
+
+.gate__forget {
+  position: absolute;
+  top: 61%;
+  left: 58.33%;
+  width: 24%;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: #2f6f4f;
+  font-size: clamp(9px, 1.2vh, 12px);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gate__forget:hover {
+  color: #1f4f36;
+}
+
+
+/* ---- wallet chips ------------------------------------------------------
+   The wallet used to be one walnut panel with three small brown pills inside
+   it, which put two borders and two backgrounds between the player and a
+   number they read constantly. It is now a bare row of standalone parchment
+   chips: one border, one fill, and the count set large enough to take in at a
+   glance from across the harbour.
+
+   Every dimension hangs off `--chip-h` so the responsive steps at the bottom
+   are one line each, rather than restating min-width/height/font-size the way
+   the pills did in four separate media queries. This block is last in the
+   file on purpose -- it has to outrank those earlier `.wallet .pill` rules. */
+
+.wallet {
+  --chip-h: 40px;
+  /* The count is the reason the chip exists, so it carries most of the
+     height; the disc is sized off the same number to stay in proportion. */
+  --chip-font: calc(var(--chip-h) * 0.52);
+  --chip-disc: calc(var(--chip-h) - 10px);
+
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-self: end;
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.wallet .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /* Room for four digits before the chip has to grow; `formatNumber` caps the
+     text at "1.2M", so nothing here ever needs more than five. */
+  min-width: calc(var(--chip-h) * 2.5);
+  height: var(--chip-h);
+  padding: 0 calc(var(--chip-h) * 0.3) 0 5px;
+  border: 2px solid #4a2c17;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f7e8c4, #e8d3a5);
+  box-shadow: 0 2px 4px rgba(37, 24, 15, 0.3), inset 0 1px 0 rgba(255, 253, 240, 0.65);
+  color: #4a2c17;
+  font-size: var(--chip-font);
+  font-weight: 700;
+  line-height: 1;
+  filter: none;
+}
+
+/* The number sits between the disc and the chip's right edge rather than
+   hard against either, so a count that grows from 39 to 1,240 pushes the
+   chip outwards symmetrically instead of drifting off the disc. */
+.wallet .pill b {
+  flex: 1;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 250, 231, 0.6);
+}
+
+/* The currency art sits directly on the chip now -- no disc behind it. */
+.wallet .pill__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--chip-disc);
+  height: var(--chip-disc);
+  border: 0;
+  border-radius: 0;
+  background: transparent center / 66% auto no-repeat;
+  box-shadow: none;
+  /* Both sheets are pixel art at 12-14px native and get blown up well past
+     that here; smooth filtering would turn the coin's rim to mush. */
+  image-rendering: pixelated;
+}
+
+/* The chip's ::before was the icon before the disc existed. */
+.wallet .pill::before { content: none; }
+
+.wallet .pill--bait .pill__icon { background-image: url("/assets/bait.png"); }
+/* The struck coin the shop already prices in, in place of the yellow-circle
+   emoji the wallet was still showing. Same sheet as `SHEETS.gold`. */
+.wallet .pill--coin .pill__icon { background-image: url("/assets/gold.png"); }
+/* Its own supplied art now too (`SHEETS.pearl`, see `build_pearl_icon.py`),
+   in place of the placeholder glyph this used to fall back to before Pearl
+   had a sheet of its own. */
+.wallet .pill--pearl .pill__icon { background-image: url("/assets/pearl.png"); }
+
+/* USDG's mark is vector, not a sprite sheet like the three above, so it is
+   the one icon here that must NOT be nearest-neighboured up to chip size. */
+.wallet .pill--usdg .pill__icon {
+  background-image: url("/assets/usdg.svg");
+  background-size: 92% auto;
+  image-rendering: auto;
+}
+
+@media (max-width: 1000px) { .wallet { --chip-h: 34px; gap: 6px; } }
+@media (max-width: 860px) { .wallet { --chip-h: 30px; gap: 5px; } }
+@media (max-width: 560px) { .wallet { --chip-h: 27px; gap: 4px; } }
+
+/* ------------------------------------------------------ top-left wallet --
+   The top bar is one left-aligned group: the three currency chips. The walnut
+   tray the wallet sat in is gone, so the chips read as three counters over
+   the harbour rather than as a panel carved into thirds.
+
+   Last in the file, after the chip block above, because it has to outrank
+   that block's `justify-self: end` and the `.hud .wallet` fills set by the
+   two theme chapters. */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+/* The tray only. The chips keep their own parchment discs -- they are what
+   makes a count legible against water. */
+.hud .wallet {
+  justify-self: start;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  filter: none;
+}
+
+/* ------------------------------------------------------ the USDG group --
+
+   Drawn by the `.wallet` rules above and nothing else -- it carries that
+   class, so the chip in it is the same chip as its three neighbours and the
+   only thing separating the two groups is the top bar's own gap. What makes
+   the split read is the button: three counters, a gap, then a balance with
+   something to press beside it.
+
+   Deposit is that button, and has to look pressable rather than like a chip
+   that happens to be gold: a raised face over a hard bottom edge, and that
+   edge collapsing under the click. */
+.btn--deposit {
+  min-height: calc(var(--chip-h) - 4px);
+  padding: 0 16px;
+  border: 2px solid #4a2c17;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #ffe08a, #f0b62f);
+  color: #3d2506;
+  font-size: calc(var(--chip-font) * 0.72);
+  letter-spacing: 0.02em;
+  box-shadow: 0 3px 0 #a06a15, inset 0 1px 0 rgba(255, 250, 224, 0.7);
+  text-shadow: 0 1px 0 rgba(255, 246, 214, 0.6);
+}
+
+.btn--deposit:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.btn--deposit:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 #a06a15, inset 0 1px 0 rgba(255, 250, 224, 0.7);
+}
+
+@media (max-width: 560px) {
+  .topbar { gap: 6px; }
+  .btn--deposit { padding: 0 10px; }
+}
+
+/* ------------------------------------------------- the control bar -------
+   Auto-fishing, the Stake, and the rod badge were three panels
+   sitting side by side, each with its own border and its own drop shadow.
+   They are the controls a player works mid-run, so they are one panel now:
+   the row itself is the card, the three are segments inside it, and the only
+   thing between them is a hairline.
+
+   Last in the file because it has to outrank `.hud .control` / `.hud
+   .rodpanel`, which paint the segments' old chrome from two theme chapters
+   above. */
+
+.dials__row {
+  align-items: stretch;
+  /* Nothing between the segments but their own padding and the divider --
+     a gap here would read as the three boxes again, just closer together. */
+  gap: 0;
+  flex-wrap: nowrap;
+  padding: 0;
+}
+
+/* The bar wears the walnut the controls used to wear individually, so the
+   merge does not quietly turn them into a parchment panel. */
+.hud .panel.dials__row {
+  color: #fff0cc;
+  border-color: #402719;
+  background: #6d4a2c;
+}
+
+/* Segments carry no chrome of their own -- the bar is the card. Their
+   paddings stay, because that is what sets the bar's inner spacing at every
+   breakpoint the `.control` and `.rodpanel` steps already tune. */
+.hud .dials__seg {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  filter: none;
+  backdrop-filter: none;
+}
+
+.dials__seg + .dials__seg {
+  border-left: 1px solid rgba(255, 240, 204, 0.16);
+}
+
+/* The toggle is a square button, so its segment centres rather than stacks. */
+.dials__seg--auto {
+  display: flex;
+  align-items: center;
+  padding: 7px 9px;
+}
+
+/* Takes the room the other two do not, and is allowed to shrink past the
+   cards' natural width -- on a phone the three names compress rather than
+   pushing the rod badge off the bar. */
+.dials__seg--controls {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ------------------------------------------------ mockup fidelity pass ---
+   The harbor UI pack supplies the material language for the redesigned HUD:
+   walnut for controls, parchment for information, and framed item slots.
+   This stays entirely in the DOM overlay; Phaser's harbor scene remains
+   untouched. */
+.hud {
+  --walnut-ui: #5a351d;
+  --parchment-ui: #f1e2bd;
+  --frame-dark-ui: #382015;
+  --frame-gold-ui: #d7a14a;
+  --bag-slot: 50px;
+  --bag-gap: 7px;
+  --bag-pad: 10px;
+  --bag-cols: 5;
+  --bag-rows: 5;
+  padding: calc(12px + var(--safe-top)) 12px calc(12px + var(--safe-bottom));
+  grid-template-columns: minmax(250px, 1fr) minmax(560px, 1.8fr) minmax(296px, 1fr);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "top top top"
+    "left . right"
+    "chat dials bag";
+  gap: 8px 12px;
+}
+
+.hud .panel {
+  border: 2px solid var(--frame-dark-ui);
+  border-radius: 10px;
+  background:
+    linear-gradient(rgba(255, 250, 231, .55), rgba(220, 194, 145, .16)),
+    url('/assets/ui/cozy-parchment-texture-v1.png') center / 220px 220px,
+    var(--parchment-ui);
+  box-shadow: 0 3px 0 rgba(52, 30, 17, .7), inset 0 0 0 1px rgba(255, 247, 218, .8);
+}
+
+.topbar { gap: 10px; }
+.wallet { gap: 8px; }
+.wallet .pill {
+  min-width: 104px;
+  height: 40px;
+  padding-right: 12px;
+  border: 2px solid var(--frame-dark-ui);
+  background:
+    linear-gradient(#fff4d5, #e7cb91),
+    url('/assets/ui/cozy-parchment-texture-v1.png') center / 170px 170px;
+  box-shadow: 0 2px 0 rgba(52, 30, 17, .72), inset 0 1px 0 #fff8df;
+  color: #432815;
+  font-size: 20px;
+}
+.wallet .pill__icon { width: 30px; height: 30px; }
+
+.side { padding-top: 56px; }
+.board, .side--right .board { width: 194px; max-height: none; padding: 10px 12px; }
+.panel__title { font-size: 14px; }
+.board__list { font-size: 13px; }
+.board__sub { font-size: 12px; }
+.dot { width: 9px; height: 9px; }
+
+.chat { width: 250px; min-height: 140px; padding: 10px; }
+.chat__toggle { font-size: 13px; }
+.chat__log { height: 64px; font-size: 12px; }
+.chat__input { min-height: 34px; }
+.btn--send { min-width: 38px; border: 1px solid #795225; background: #dfbf76; color: #392313; }
+
+.dials { width: 640px; max-width: 100%; gap: 7px; }
+.cast { width: 330px; min-height: 50px; padding: 7px 16px; }
+.hud .cast, .hud .dials__row {
+  border: 2px solid var(--frame-dark-ui);
+  background:
+    linear-gradient(rgba(126, 82, 41, .08), rgba(40, 21, 12, .14)),
+    url('/assets/ui/cozy-walnut-texture-v1.png') center / 250px 250px,
+    var(--walnut-ui);
+  box-shadow: 0 3px 0 rgba(52, 30, 17, .75), inset 0 0 0 1px rgba(214, 161, 74, .55);
+}
+.cast__label { font-size: 15px; font-weight: 800; }
+.cast__track { height: 16px; border: 2px solid #3d2414; }
+.cast__fill { background: linear-gradient(90deg, #68ad73, #c2e39d); }
+.hud .dials__row { min-height: 78px; border-radius: 10px; }
+.dials__seg--auto { padding: 8px; }
+.iconbtn { border: 2px solid var(--frame-dark-ui); background: #6e4321; box-shadow: inset 0 0 0 1px rgba(217, 166, 81, .52), 0 2px 0 rgba(52, 30, 17, .68); }
+.dials__seg--auto .iconbtn { width: 54px; height: 58px; border-radius: 9px; background: linear-gradient(#846130, #553119); }
+.iconbtn[aria-pressed='true'] { outline: 2px solid #86d567; outline-offset: 1px; }
+.riskband { min-height: 26px; border-radius: 7px; }
+.riskband[aria-current='true'], .chip[aria-pressed='true'] { border-color: #f0c954; box-shadow: inset 0 0 0 1px #fbe49a; }
+.rodpanel { width: 106px; }
+
+.bagzone { gap: 7px; }
+.iconbar { gap: 5px; }
+.iconbar .iconbtn { width: 54px; height: 48px; border-radius: 8px; }
+.bag { width: var(--bag-width); padding: 9px var(--bag-pad) var(--bag-pad); }
+.bag .panel__title { margin-bottom: 7px; }
+.bagslot {
+  border: 0;
+  border-radius: 6px;
+  background: url('/assets/ui/slot.png') center / 100% 100% no-repeat;
+  box-shadow: none;
+}
+.bagslot:not(.bagslot--empty) { background-image: url('/assets/ui/slot-gold.png'); }
+
+/* The Bag trigger belongs to the compact-phone action rail only; desktop has
+   the full inventory visibly open beside Shop, Log, and Ranks. */
+@media (min-width: 861px) {
+  .iconbtn--mobile-bag { display: none; }
+}
+
+@media (max-width: 1000px) {
+  .hud { grid-template-columns: minmax(190px, .8fr) minmax(430px, 1.6fr) minmax(248px, .9fr); }
+  .wallet .pill { min-width: 78px; font-size: 16px; }
+  .dials { width: min(600px, 100%); }
+  .bag { --bag-slot: 42px; --bag-gap: 5px; --bag-pad: 8px; }
+}
+
+@media (max-width: 860px) {
+  .hud {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto auto;
+    grid-template-areas: "top" "left" "bag" "dials";
+    padding: calc(8px + var(--safe-top)) 8px calc(8px + var(--safe-bottom));
+  }
+  .topbar { gap: 6px; }
+  .wallet { gap: 5px; }
+  .wallet .pill { min-width: 65px; height: 32px; font-size: 14px; }
+  .wallet .pill__icon { width: 24px; height: 24px; }
+  .side { display: none; }
+  .bagzone { justify-self: end; }
+  .bag {
+    display: none;
+    position: fixed;
+    right: 8px;
+    bottom: calc(64px + var(--safe-bottom));
+    z-index: 3;
+    width: var(--bag-width);
+  }
+  .bag.is-open { display: block; }
+  .iconbar .iconbtn { width: 48px; height: 48px; }
+  .dials { width: 100%; }
+  .chat { position: fixed; left: 8px; bottom: calc(8px + var(--safe-bottom)); width: auto; min-height: 0; padding: 7px 10px; z-index: 2; }
+  /* The expand affordance used to be a `+` glued to the label; it is the
+     minimize button's own glyph now, so the pseudo-element would double it. */
+  .chat__min { width: 28px; height: 28px; }
+}
+
+@media (max-width: 560px) {
+  /* The fishing dock becomes two compact rows on a portrait phone instead of
+     squeezing five stake chips into an unreadable desktop-sized strip. */
+  .dials__row { flex-wrap: wrap; }
+  .dials__seg--auto { flex: 0 0 62px; }
+  .dials__seg--rod { flex: 0 0 78px; }
+  .dials__seg--controls { flex: 1 1 calc(100% - 140px); }
+  .dials__seg--controls .stakerow { gap: 4px; }
+  .dials__seg--controls .chip { min-width: 25px; padding-inline: 3px; }
+  .dials__seg--controls .chiprow { gap: 2px; }
+  .dials__seg--controls .stakenote { font-size: 10px; }
+  /* Where the control bar is at its most cramped the dial shows only the band
+     the player is actually in. Three names shrunk to fit would truncate to
+     initials, and "S | B | R" is not a gauge -- one readable word is. The two
+     unlit bands are the first thing worth losing, because their whole job is
+     to give the lit one context a player already has once they can read it. */
+  .dials__seg--controls .riskdial { gap: 3px; }
+  .dials__seg--controls .riskband { padding-inline: 3px; }
+  .dials__seg--controls .riskband__name { font-size: 11px; }
+  .dials__seg--controls .riskband:not([aria-current='true']) { display: none; }
+}
+
+/* -------------------------------- HUD composition refinement -----------
+   Large surfaces are CSS-resizable so their title and content areas do not
+   distort. Pixel assets remain at fixed sizes (icons and inventory art),
+   preserving their crisp original grid. */
+.hud .panel {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* One restrained resource tray keeps the counters aligned without making
+   each counter a separately stretched frame. */
+.wallet {
+  padding: 4px;
+  border: 2px solid #382015;
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(126, 82, 41, .08), rgba(40, 21, 12, .14)),
+    url('/assets/ui/cozy-walnut-texture-v1.png') center / 220px 220px,
+    #5a351d;
+  box-shadow: 0 3px 0 rgba(52, 30, 17, .72), inset 0 0 0 1px rgba(214, 161, 74, .5);
+}
+.wallet .pill {
+  min-width: 96px;
+  border-radius: 7px;
+  color: #432815;
+  text-shadow: 0 1px rgba(255, 250, 231, .7);
+}
+
+/* Information panels reserve a real title strip. This prevents titles from
+   sitting on ornamental corners and gives player/chat copy enough breathing
+   room at the reference resolution. */
+.board,
+.chat,
+.bag {
+  padding: 10px 12px 12px;
+}
+.board .panel__title,
+.chat__toggle,
+.bag .panel__title {
+  min-height: 22px;
+  margin: 0 0 7px;
+  line-height: 22px;
+}
+.board { min-height: 88px; }
+.chat { min-height: 142px; }
+.bag { min-height: 320px; }
+.chat__log { height: 61px; }
+
+/* A fixed three-button action rail replaces the overly decorated stretched
+   tiles. Each action keeps a large, stable hit target and label. */
+.iconbar { gap: 6px; }
+.iconbar .iconbtn {
+  width: 54px;
+  height: 50px;
+  border-radius: 8px;
+  border: 2px solid #402719;
+  background:
+    linear-gradient(rgba(255, 236, 180, .09), rgba(25, 12, 7, .18)),
+    url('/assets/ui/cozy-walnut-texture-v1.png') center / 120px 120px,
+    #714722;
+  box-shadow: 0 2px 0 rgba(52, 30, 17, .7), inset 0 0 0 1px rgba(214, 161, 74, .45);
+}
+
+/* The command deck owns one bottom-safe block. Its individual segments are
+   simple, high-contrast controls instead of independently stretched art. */
+.dials {
+  margin-bottom: 2px;
+  padding-bottom: 2px;
+}
+.hud .dials__row {
+  min-height: 78px;
+  padding: 7px 8px;
+  border: 2px solid #382015;
+  border-radius: 10px;
+  background:
+    linear-gradient(rgba(126, 82, 41, .08), rgba(40, 21, 12, .14)),
+    url('/assets/ui/cozy-walnut-texture-v1.png') center / 250px 250px,
+    #5a351d;
+  box-shadow: 0 3px 0 rgba(52, 30, 17, .75), inset 0 0 0 1px rgba(214, 161, 74, .55);
+}
+.dials__seg--auto { padding: 0 8px 0 0; }
+.dials__seg--rod { padding-left: 9px; }
+.dials__seg + .dials__seg { border-left-color: rgba(255, 240, 204, .22); }
+.dials__seg--auto .iconbtn { width: 54px; height: 58px; }
+.chip { min-height: 28px; }
+
+/* The grid needs quiet, repeatable cells rather than large framed cards. */
+.bagslot,
+.bagslot:not(.bagslot--empty) {
+  border: 1px solid #79502f;
+  border-radius: 6px;
+  background: rgba(127, 77, 37, .14);
+  box-shadow: inset 0 1px rgba(255, 248, 224, .5);
+}
+.bagslot:not(.bagslot--empty) {
+  border-color: #d7a14a;
+  background: rgba(229, 189, 99, .18);
+}
+
+@media (max-width: 860px) {
+  .wallet { padding: 2px; }
+  .wallet .pill { min-width: 63px; }
+  .chat { min-height: 0; }
+  .bag { min-height: 0; }
+}
+
+/* -------------------------------- shared wood chrome, nine-sliced -------
+   Every HUD panel -- board, chat, bag, wallet, cast bar, dials row and the
+   chat title rail -- shares one frame cut from `wood-panel-9slice.png`.
+   That source is a compact 48x48 crate-plank panel: its corner rivets run
+   right up to its 9px mark, so `9` is the slice that keeps them whole
+   instead of cutting through them, and `round` (rather than `stretch`)
+   repeats the plank boards at their native size instead of smearing the
+   handful of baked-in plank lines across whatever the live panel's size
+   ends up being -- `stretch` is what produced the warped corners and
+   smeared boards this replaces. Confirmed by rendering each panel size
+   that actually occurs in the HUD through headless Chromium before this
+   went in.
+
+   Selectors are `.hud .board` etc rather than the bare class: `.hud .panel`
+   (the light parchment card, further up this file) and `.hud .wallet`
+   (a `border: 0` reset, further up still) are both two-class selectors, so
+   a bare one-class `.board`/`.wallet` rule here would lose the specificity
+   contest no matter where it sits in the file -- that was silently eating
+   the wallet's frame and the board/bag panels' backgrounds when this was
+   first tried. Matching `.hud X` gives this equal specificity, and it
+   still wins because it comes later.
+
+   Board and chat are cut from a second sprite, `parchment-panel-9slice.png`
+   -- same corner-rivet frame, but a flat tan interior instead of wood
+   planking, so they read as the "paper" surfaces (player list, messages)
+   against the bag/wallet/cast/dials' wood ones. Its rivets sit at the same
+   9px mark, so it takes the same `9 fill / <width>px / 0 round`. */
+.hud .board,
+.hud .chat {
+  border: 18px solid transparent;
+  border-image: url('/assets/ui/parchment-panel-9slice.png') 9 fill / 18px / 0 round;
+  border-radius: 0;
+  background: none;
+  box-shadow: 0 3px 0 rgba(42, 22, 12, .68);
+  image-rendering: pixelated;
+}
+
+.hud .bag,
+.hud .wallet {
+  border: 18px solid transparent;
+  border-image: url('/assets/ui/wood-panel-9slice.png') 9 fill / 18px / 0 round;
+  border-radius: 0;
+  background: none;
+  box-shadow: 0 3px 0 rgba(42, 22, 12, .68);
+  image-rendering: pixelated;
+}
+
+.board { padding: 5px 9px 8px; }
+.chat { padding: 5px 9px 8px; }
+.bag { padding: 5px 9px 9px; }
+.board .panel__title,
+.chat__toggle,
+.bag .panel__title {
+  margin-bottom: 5px;
+}
+
+/* Readability: the bag (and wallet) sit on the dark wood interior above, so
+   their content keeps light ink. Board and chat are back on a light tan
+   interior (`parchment-panel-9slice.png`), so their text needs no override
+   here -- `.panel__title`, `.board__sub`, `.chat__log/__time/__who` already
+   default to dark ink further up this file, which is what a light panel
+   needs. */
+.bag .panel__title { color: #fff0cc; border-bottom-color: rgba(255, 240, 204, .25); }
+.bag__count { color: #e6c77e; }
+.bagslot,
+.bagslot:not(.bagslot--empty) {
+  background: url('/assets/ui/dark-box-panel.png') center / cover no-repeat, #3c1e19;
+  border-color: #241209;
+  box-shadow: inset 0 1px rgba(0, 0, 0, .35);
+}
+.bagslot:not(.bagslot--empty) {
+  border-color: #d7a14a;
+}
+
+/**
+ * Chest/gem rarity as the slot's own frame colour (see the removed
+ * `.bagslot__tier` bar, further up this file, for why). `--tier-color` is
+ * set inline per slot in `renderBag()`; two classes matches the specificity
+ * of the plain gold `.bagslot:not(.bagslot--empty)` border two rules up, so
+ * this has to come after it to actually win.
+ */
+.bagslot.bagslot--tiered {
+  border-width: 2px;
+  border-color: var(--tier-color);
+  box-shadow: inset 0 1px rgba(0, 0, 0, .35), 0 0 6px var(--tier-color);
+}
+
+.hud .cast {
+  border: 14px solid transparent;
+  border-image: url('/assets/ui/wood-panel-9slice.png') 9 fill / 14px / 0 round;
+  border-radius: 0;
+  background: none;
+  box-shadow: 0 3px 0 rgba(42, 22, 12, .68);
+  image-rendering: pixelated;
+}
+
+.hud .dials__row {
+  border: 18px solid transparent;
+  border-image: url('/assets/ui/wood-panel-9slice.png') 9 fill / 18px / 0 round;
+  border-radius: 0;
+  background: none;
+  box-shadow: 0 3px 0 rgba(42, 22, 12, .72);
+  image-rendering: pixelated;
+}
+
+/* The chat title rail uses the same sprite too -- see its own rule in the
+   "chat message card" section below, which is the one that actually wins
+   the cascade (this file redeclares `.chat__toggle` layout there, so that
+   is where its border-image lives now). */
+
+/* Counters are short enough to use their frame at a fixed height; only the
+   horizontal middle grows when a large balance needs extra space. Flat dark
+   box instead of the gold-outlined walnut capsule -- no border-image slicing
+   needed, `dark-box-panel.png` is a solid fill. */
+.wallet .pill {
+  border: 1px solid #241209;
+  border-image: none;
+  border-radius: 5px;
+  background: url('/assets/ui/dark-box-panel.png') center / cover no-repeat, #3c1e19;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, .35);
+  min-width: 100px;
+  padding: 0 8px 0 2px;
+  color: #fff0cc;
+  text-shadow: 0 1px #3a2112;
+}
+
+@media (max-width: 860px) {
+  .hud { --bag-border: 14px; }
+  .hud .board,
+  .hud .chat,
+  .hud .bag,
+  .hud .wallet { border-width: 14px; border-image-width: 14px; }
+  .hud .cast { border-width: 12px; border-image-width: 12px; }
+  .hud .dials__row { border-width: 14px; border-image-width: 14px; }
+  .wallet .pill { min-width: 63px; }
+}
+
+/* ------------------------------------------------ chat message card ------
+   The chat uses the parchment nine-slice frame shared with the players
+   board. The title rail sits inside that same card now (no frame of its
+   own -- just the "Chat +" label), which keeps the title out of the
+   message area and gives every line a deliberate, readable inset. */
+.chat {
+  position: relative;
+  display: grid;
+  grid-template-rows: 30px minmax(88px, 1fr) auto;
+  gap: 0;
+  width: 280px;
+  /* Definite, not a floor: with `min-height` the card was content-sized, so
+     the 1fr log track grew with every line and the panel climbed the left
+     edge toward the top bar. A fixed height pins it to the bottom-left and
+     hands the overflow to `.chat__log`, which already scrolls.
+
+     Two heights, and only two: this resting one, and the taller one the
+     card takes while the composer is open. Both are definite, so the log
+     scrolls in either and the card never sizes to its content. */
+  height: 176px;
+  transition: height 140ms ease;
+  padding: 8px 8px 15px;
+  overflow: visible;
+}
+
+/* The rail is the card's first grid row and the only row that survives
+   minimizing: the label on the left, the minimize button hard right. */
+.chat__rail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+}
+
+/* Plain label, no panel chrome of its own -- it reads directly on the
+   chat card's own parchment background. */
+.chat__toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  border-image: none;
+  background: none;
+  box-shadow: none;
+  color: #4d301e;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  text-align: left;
+  text-shadow: none;
+}
+
+/* Something was said while the card was minimized. A dot rather than a
+   count: the log is two clicks away and the number would only ask the
+   player to do arithmetic about a thing they can just read. */
+.chat__unread {
+  display: none;
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b8791b;
+  box-shadow: 0 0 0 1px rgba(77, 48, 30, .35);
+}
+
+.chat.is-collapsed.is-unread .chat__unread { display: block; }
+
+/* Minimize/expand. The glyph lives in CSS so the collapsed class alone
+   flips it -- `-` while the card is open, `+` once it is a rail. */
+.chat__min {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-image: none;
+  border-radius: 5px;
+  background: none;
+  box-shadow: none;
+  color: #b8791b;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: none;
+  cursor: pointer;
+}
+
+.chat__min::after {
+  content: '\2013';
+  line-height: 1;
+}
+
+.chat.is-collapsed .chat__min::after { content: '+'; }
+
+.chat__min:hover {
+  background: rgba(122, 78, 40, .14);
+  color: #8a5712;
+}
+
+.chat__min:focus-visible {
+  outline: 2px solid #b8791b;
+  outline-offset: 1px;
+}
+
+.chat__log {
+  height: auto;
+  min-height: 88px;
+  margin: 0;
+  padding: 13px 9px 19px;
+  color: #4a2c17;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-y: auto;
+
+  /* A muted thumb on no track at all, rather than the full browser bar the
+     log had: it sits on parchment, and the default chrome was the loudest
+     thing in the card. Standard properties only -- `scrollbar-width` makes
+     Chromium ignore ::-webkit-scrollbar rules, so a webkit block here would
+     be dead code, and both properties are supported in the browsers the
+     game targets. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(122, 78, 40, .5) transparent;
+}
+
+.chat__log li { margin: 0 0 3px; }
+.chat__time { margin-right: 4px; }
+.chat__who { margin-right: 4px; }
+
+.chat__form {
+  display: none;
+  gap: 5px;
+  padding: 5px 1px 0;
+  border-top: 1px solid rgba(99, 58, 29, .28);
+}
+
+.chat.is-composing {
+  /* Open: the card grows rather than the composer eating the log. The extra
+     84px is the 34px composer row plus 50px of reading room, so opening the
+     chat to type also shows more of what was said. */
+  grid-template-rows: 30px minmax(48px, 1fr) 34px;
+  height: 260px;
+}
+.chat.is-composing .chat__form { display: flex; }
+.chat.is-composing .chat__log { min-height: 48px; padding-bottom: 7px; }
+
+/* The left column is narrowest between 861 and 1000px -- roughly 210px once
+   the three tracks have taken their minimums -- so the card holds its old
+   width there rather than reaching across into the dials. */
+@media (max-width: 1000px) {
+  .chat { width: 220px; }
+}
+
+.chat__input {
+  min-height: 29px;
+  padding: 5px 8px;
+  border: 1px solid #79502f;
+  border-radius: 5px;
+  background: rgba(255, 250, 232, .86);
+  color: #4a2c17;
+}
+
+.chat .btn--send {
+  min-width: 34px;
+  min-height: 29px;
+  border: 1px solid #6a431f;
+  border-radius: 5px;
+  background: #d9b96c;
+  color: #3c2412;
+}
+
+.chat.is-collapsed {
+  display: block;
+  width: 160px;
+  /* Collapsed is the one state that is content-sized: the title rail alone. */
+  height: auto;
+  min-height: 0;
+  padding-bottom: 8px;
+}
+.chat.is-collapsed .chat__toggle { margin: 0; }
+
+@media (max-width: 860px) {
+  .chat {
+    width: 160px;
+    min-height: 0;
+    padding: 7px 8px 8px;
+  }
+}
+
+/* NOTE: every HUD panel -- board, chat, bag, wallet, cast bar, dials row,
+   chat title rail -- is deliberately nine-sliced from the same hand-supplied
+   `wood-panel-9slice.png` (48x48; see "shared wood chrome" above). An
+   earlier pass tried this and it came out visibly broken: `8 fill / ... /
+   0 stretch` sliced 8px off each edge, which cuts straight through that
+   source's corner rivets (giving warped corners) and leaves a 32x32 middle
+   that already has baked-in plank lines, which `stretch` then smeared
+   across whatever size the live panel happened to be. The fix wasn't to
+   drop the asset -- it's `9 fill / <width>px / 0 round`: slice 9 keeps the
+   rivets whole, and `round` repeats the plank boards at native size instead
+   of stretching them. Verified against every panel size in the HUD via
+   headless Chromium (see git history around 2026-09-01 if this needs
+   revisiting) before landing. If this ever looks broken again, suspect a
+   new rule elsewhere in this file beating these selectors on specificity
+   (`.hud .panel` and `.hud .wallet` upstream are both two-class and have
+   done exactly that before) before suspecting the slice numbers. */
+
+/* ---------------------------------------------------- gold wallet popup --
+   The Gold chip in the top bar now opens its own screen (`openGoldWallet()`
+   in hud.js). The chip itself stays the exact `.pill` markup and styling
+   the wallet tray already has -- this only layers a pointer cursor and a
+   press/hover cue on top, on the coin chip alone, so Bait and Pearl don't
+   pick up an affordance for a click they don't have. */
+.wallet .pill--coin {
+  cursor: pointer;
+  transition: filter 120ms ease, transform 90ms ease;
+}
+.wallet .pill--coin:hover,
+.wallet .pill--coin:focus-visible {
+  filter: brightness(1.15);
+}
+.wallet .pill--coin:active {
+  transform: translateY(1px);
+}
+.wallet .pill--coin:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* The panel itself borrows the leaderboard's dark modal skin (`.modal--dark`,
+   further up this file) rather than the parchment one -- a wallet balance
+   is a readout to glance at and close, the same kind of screen the
+   leaderboard is, not a counter worked in like the shop. */
+.modal__body--goldwallet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 4px 6px;
+}
+
+/* The coin the screen is about, over what it is for and what it costs. Centred
+   and stacked, the way a purchase dialog introduces its own subject -- this is
+   the half of the panel a player reads before deciding anything. */
+.gw-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0 2px;
+}
+
+.gw-hero__art {
+  flex: none;
+  image-rendering: pixelated;
+}
+
+.gw-hero__line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  color: rgba(243, 228, 196, 0.75);
+}
+
+.gw-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* The two numbers that price the decision: what is held, and what a coin
+   costs. Pills rather than a table, because neither is a figure to study. */
+.gw-pill {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 197, 66, 0.3);
+  background: rgba(245, 197, 66, 0.14);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* How much to buy: the label and its note on the left, the box on the right,
+   in one dark band that separates the reading above from the doing below. */
+.gw-amount {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 197, 66, 0.14);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.gw-amount__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gw-amount__label {
+  font-size: 15px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--parchment);
+}
+
+.gw-amount__hint {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(245, 197, 66, 0.75);
+}
+
+.gw-amount__input {
+  flex: none;
+  width: 96px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 197, 66, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--parchment);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.gw-amount__input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+/* Buy spans the full row, like the reference wallet's own "Deposit"; cash
+   out and history share the row beneath it. */
+.gw-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.gw-btn {
+  appearance: none;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 90ms ease;
+}
+.gw-btn:hover { filter: brightness(1.08); }
+.gw-btn:active { transform: translateY(1px); }
+
+.gw-btn--primary {
+  grid-column: 1 / -1;
+  padding: 13px 12px;
+  border: 1px solid var(--gold-deep);
+  background: linear-gradient(180deg, #ffdf82, var(--gold));
+  color: #3d2506;
+  font-size: 15px;
+}
+
+.gw-btn--secondary {
+  border: 1px solid rgba(245, 197, 66, 0.25);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--parchment);
+}
+
+.gw-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(243, 228, 196, 0.45);
+  text-align: center;
+}
+
+/* Two variants the Gold screen's own three buttons never needed: one that
+   spans the row on its own, and one quiet enough to sit under a pair. */
+.gw-btn--wide { grid-column: 1 / -1; }
+
+.gw-btn--quiet {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(245, 197, 66, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(243, 228, 196, 0.75);
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.gw-btn--discord {
+  border: 1px solid #4d4a8f;
+  background: #5865f2;
+  color: #f4f4ff;
+}
+
+/* ------------------------------------------------------ the USDG wallet -- */
+
+/* Same dark skin as the Gold screen, one column, in the order money moves:
+   whose account, what is in it, the ways in, then the ways out. */
+.modal__body--wallet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 4px 6px;
+}
+
+/* The panel is taller than the card and the card is the thing that scrolls,
+   so nothing in this column may be squeezed to make it fit: a balance row
+   flattened to two pixels is worse than a scrollbar. */
+.modal__body--wallet > * {
+  flex: none;
+}
+
+.wal-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 197, 66, 0.14);
+  background: rgba(0, 0, 0, 0.24);
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(243, 228, 196, 0.8);
+}
+
+/* Grey, not green: there is no account connected to be pleased about. */
+.wal-account__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(243, 228, 196, 0.35);
+}
+
+.wal-account__name { flex: 1 1 auto; min-width: 0; }
+
+.wal-account__chevron { color: rgba(243, 228, 196, 0.4); }
+
+.wal-balances {
+  display: flex;
+  flex-direction: column;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 197, 66, 0.14);
+  background: rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+}
+
+/* Icon, name, number -- the number hard right, so a column of them can be
+   compared without reading the names again. */
+.wal-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+}
+
+.wal-row + .wal-row {
+  border-top: 1px solid rgba(245, 197, 66, 0.1);
+}
+
+.wal-row__art { flex: none; image-rendering: pixelated; }
+
+.wal-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(243, 228, 196, 0.7);
+}
+
+.wal-row__value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--parchment);
+}
+
+/* A lettered disc for a chain coin the game has no art for at all. It marks a
+   row; it does not pretend to be a coin the player has seen. */
+.wal-coin {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(245, 197, 66, 0.35);
+  background: rgba(245, 197, 66, 0.16);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* USDG has art of its own, so its disc is the art rather than a letter in a
+   ring. After `.wal-coin` deliberately: it is overriding it. */
+.wal-coin--usdg {
+  border: 0;
+  border-radius: 0;
+  background: url("/assets/usdg.svg") center / contain no-repeat;
+}
+
+.wal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ---- deposit, unfolded in place ---- */
+
+.wal-transfer[hidden] {
+  display: none;
+}
+
+.wal-transfer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 197, 66, 0.2);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.wal-transfer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wal-transfer__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.wal-transfer__close {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: rgba(243, 228, 196, 0.5);
+  font-size: 17px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.wal-transfer__close:hover { color: var(--gold); }
+
+.wal-transfer__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.wal-transfer__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(243, 228, 196, 0.6);
+}
+
+/* The address and its copy button. Both are inert until there is an address:
+   see walletTransfer for why nothing is invented here. */
+.wal-address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 197, 66, 0.18);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.wal-address__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: rgba(243, 228, 196, 0.55);
+}
+
+.wal-address__copy {
+  appearance: none;
+  flex: none;
+  border: 0;
+  background: none;
+  color: rgba(243, 228, 196, 0.5);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.wal-address__copy:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wal-transfer__hint,
+.wal-cashout__note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(243, 228, 196, 0.5);
+}
+
+/* ---- cashout ---- */
+
+.wal-cashout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 197, 66, 0.14);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.wal-cashout__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(243, 228, 196, 0.6);
+}
+
+/* The route money takes out, drawn rather than described. */
+.wal-route {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  font-size: 12px;
+  color: var(--parchment);
+}
+
+.wal-route__art { flex: none; image-rendering: pixelated; }
+.wal-route__arrow { color: rgba(245, 197, 66, 0.7); }
+
+.wal-route__chain {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 197, 66, 0.25);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(243, 228, 196, 0.75);
+}
+
+.wal-cashout__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------- wallet sheets -- */
+
+/* The same idea as the shop's Custom sheet, dressed for the dark card: a
+   dialog that layers over the panel it came from instead of replacing it. */
+.wsheet {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border-radius: 10px;
+  background: rgba(8, 4, 2, 0.66);
+  overflow-y: auto;
+}
+
+.wsheet__card {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 197, 66, 0.25);
+  background: linear-gradient(180deg, #33200f, #20130b);
+  color: var(--parchment);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+}
+
+.wsheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(245, 197, 66, 0.2);
+}
+
+.wsheet__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.wsheet__close {
+  position: absolute;
+  right: 10px;
+  appearance: none;
+  border: 0;
+  background: none;
+  color: rgba(243, 228, 196, 0.6);
+  font-size: 19px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.wsheet__close:hover { color: var(--gold); }
+
+.wsheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+/* A sheet's own actions: Cancel and the thing the sheet is named for, side by
+   side. The primary spans its row everywhere else in the wallet, so it has to
+   be told not to here -- these two share the row by design. */
+.wal-sheetactions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.wal-sheetactions .gw-btn {
+  grid-column: auto;
+}
+
+.wal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wal-field__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(243, 228, 196, 0.65);
+}
+
+.wal-field__hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(243, 228, 196, 0.45);
+}
+
+.wal-select,
+.wal-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 197, 66, 0.25);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--parchment);
+  font: inherit;
+  font-size: 14px;
+}
+
+.wal-input::placeholder { color: rgba(243, 228, 196, 0.35); }
+
+/* ---- swap ---- */
+
+.wal-swap__side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 197, 66, 0.14);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.wal-swap__caption {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(243, 228, 196, 0.6);
+}
+
+.wal-swap__coin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.wal-swap__amount {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 197, 66, 0.2);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--parchment);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.wal-swap__balance {
+  font-size: 11px;
+  color: rgba(243, 228, 196, 0.45);
+}
+
+.wal-swap__flip {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -4px 0;
+  border-radius: 50%;
+  border: 1px solid rgba(245, 197, 66, 0.25);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--gold);
+}
+
+.wal-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 11px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.wal-details__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: rgba(243, 228, 196, 0.6);
+}
+
+.wal-details__row b { color: var(--parchment); }
+
+/* ---- sell back, withdraw, history ---- */
+
+.wal-quote {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.wal-quote--limit {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(243, 228, 196, 0.5);
+}
+
+.wal-process {
+  padding: 10px 11px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.wal-process__title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(243, 228, 196, 0.6);
+  margin-bottom: 5px;
+}
+
+.wal-process__steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(243, 228, 196, 0.6);
+}
+
+/* The one warning on this screen that is about the player's own mistake
+   rather than about the feature not being ready, so it is the one that gets
+   a colour of its own. */
+.wal-warning {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(193, 57, 43, 0.5);
+  background: rgba(193, 57, 43, 0.16);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #f6c9bf;
+}
+
+.wal-empty {
+  margin: 0;
+  padding: 22px 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(243, 228, 196, 0.7);
+}
+
+/* ---------------------------------------------------------------- odds -- */
+
+/* The journal grew a fifth tab (Odds), and the row was a hard-coded four.
+   Auto-fit rather than a new count: `minmax(0, 1fr)` lets a label shrink
+   inside its track instead of forcing the grid wider than the card. */
+.journal-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+}
+
+/* An odds figure reads as one value, so the "+ ???" hangs off it in the same
+   line rather than wrapping to its own -- and the whole thing is tabular, so
+   a column of them lines up on the digits the way a table would. */
+.odds__value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Muted, and a shade smaller: the marker qualifies the number, and at full
+   weight it competed with it for the row's one emphasis. */
+.odds__more {
+  color: var(--ink-soft);
+  font-weight: 400;
+  font-size: 0.9em;
+}
+
+/* --- the "which chest" grid ---------------------------------------------- */
+
+/* One card per tier, side by side -- the shape a reference "Sacks of
+   Treasure" panel used for the same information: a tier is read by its icon
+   and its number, and used to be a plain `.odds__row` line indistinguishable
+   in weight from the gem lines around it. Wraps to two columns on a phone. */
+.oddscards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.oddscard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px 8px;
+  border-top: 3px solid var(--tier-color, var(--wood));
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35);
+  text-align: center;
+}
+
+.oddscard__art {
+  display: block;
+  image-rendering: pixelated;
+  margin-bottom: 2px;
+}
+
+.oddscard__name {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* The card's own copy of `.odds__value` -- same tabular figure and the same
+   "+ ???" marker riding on `.odds__more`, just sized for a 96px-wide card. */
+.oddscard__odds {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--gold-deep);
+}
+
+.oddscard__inside {
+  margin-top: 4px;
+  padding: 5px 8px;
+  font-size: 11px;
+  width: 100%;
+}
+
+/* A tier the current Stake cannot reach: the art and the border fade back so
+   the card reads as "not yours yet" at a glance, the same job "never" used to
+   do -- but the number is still real (see `.oddscard__unlock`), just no
+   longer the player's live odds. */
+.oddscard--locked {
+  border-top-color: rgba(107, 69, 38, 0.35);
+}
+
+.oddscard--locked .oddscard__art {
+  filter: grayscale(1) brightness(0.75);
+  opacity: 0.6;
+}
+
+.oddscard--locked .oddscard__name {
+  color: var(--ink-soft);
+}
+
+/* The Stake this card's number belongs to, not the player's current one --
+   sits right under the odds so the two never get read as a live figure. */
+.oddscard__unlock {
+  margin-top: -2px;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 860px) {
+  .oddscards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* --- the "What's Inside" sheet's own rows --------------------------------- */
+
+/* Opened onto `.wsheet` (the wallet's own dialog chrome). Each row is just an
+   icon and a name -- no odds, so a chest's contents read as a reveal rather
+   than a table to study. */
+.oddsitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  border-bottom: 1px solid rgba(245, 197, 66, 0.12);
+}
+
+.oddsitem:last-child { border-bottom: 0; }
+
+.oddsitem__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
+.oddsitem__icon .icon { margin: 0; }
+
+.oddsitem__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* --- the chest preview's contents strip ---------------------------------- */
+
+/* The strip was a row of bare items; each is now an item with its odds under
+   it. The cell is what holds the two together and keeps the row's items
+   centred on each other rather than on their captions, which differ in width. */
+.maybe__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 52px;
+}
+
+@media (max-width: 860px) {
+  /* Five tabs at 11px overflow a phone-width card on one line; two rows of
+     labels beat five truncated ones. */
+  .journal-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  .maybe__row { gap: 8px; }
+  .maybe__cell { min-width: 44px; }
+}
+
+/* A tier this stake cannot reach. Dimmed rather than hidden: watching the
+   Legendary line go from "never" to a number is how a player finds out what
+   the Stake lever is for. */
+.odds__value--never {
+  color: var(--ink-soft);
+  font-weight: 400;
+  font-style: italic;
+}

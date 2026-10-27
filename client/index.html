@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#7abdd2" />
+    <meta
+      name="description"
+      content="Robin's Club — cast, catch, and build your legacy."
+    />
+    <title>Robin's Club</title>
+  </head>
+
+  <body>
+    <!-- Phaser mounts here. Everything else is DOM: text input, scrolling lists
+         and responsive panels are all far better handled outside the canvas. -->
+    <div id="game" aria-hidden="true"></div>
+
+    <!-- ------------------------------------------------------ name gate -->
+    <div id="gate" class="gate">
+      <div class="gate__card">
+        <h1 class="gate__title">Robin's Club</h1>
+        <p class="gate__blurb">
+          Cast. Catch. Build your legacy.
+        </p>
+
+        <label class="gate__label" for="gate-name">Display name</label>
+        <input
+          id="gate-name"
+          class="gate__input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          maxlength="16"
+          placeholder="Angler"
+        />
+        <p id="gate-error" class="gate__error" role="alert"></p>
+
+        <button id="gate-start" class="btn gate__start" type="button">
+          Start fishing
+        </button>
+
+        <p id="gate-returning" class="gate__returning" hidden></p>
+        <button id="gate-forget" class="gate__forget" type="button" hidden>
+          Not you? Start a new guest session
+        </button>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------ HUD -->
+    <!--
+      Layout, by grid area:
+        top    the wallet, hard left
+        left   (unused -- the leaderboard opens as a modal now)
+        right  online players
+        chat   compact chat (bottom-left)
+        dials  cast progress, then one bar: auto, stake, rod
+        bag    icon bar + inventory grid (bottom-right)
+    -->
+    <div id="hud" class="hud" hidden>
+      <!-- Top bar. The wallet alone, hard left, so the rest of the top edge is
+           world. The name / rod / XP card that used to sit up here is gone:
+           the level and its bar are on the rod panel down with the
+           control bar. -->
+      <header class="topbar">
+        <!-- Each currency is its own chip: a disc holding the item's own art,
+             then the count. The wallet itself is only the row that spaces
+             them, so the chips read as three counters rather than one panel
+             carved into thirds. -->
+        <div class="wallet" aria-label="Currencies">
+          <span class="pill pill--bait" title="Bait">
+            <i class="pill__icon" aria-hidden="true"></i><b id="hud-bait">0</b>
+          </span>
+          <span
+            class="pill pill--coin"
+            id="wallet-gold-pill"
+            title="Gold Coin -- open wallet"
+            role="button"
+            tabindex="0"
+            aria-haspopup="dialog"
+          >
+            <i class="pill__icon" aria-hidden="true"></i><b id="hud-gold">0</b>
+          </span>
+          <span class="pill pill--pearl" title="Pearl">
+            <i class="pill__icon" aria-hidden="true"></i><b id="hud-pearls">0</b>
+          </span>
+
+        </div>
+
+        <!-- USDG stands apart from the three counters beside it, in a group
+             of its own, because it is not the same kind of thing: bait, Gold
+             and Pearl are earned in the harbour, and this is money from
+             outside it -- the only figure up here a player adds to rather
+             than fishes for. That is also why it is the one that carries a
+             button.
+
+             It is a second `.wallet` rather than a tray of its own design, so
+             the chip in it is the same chip in the same row as the three
+             beside it, down to the responsive steps -- `cashbar` only marks
+             which of the two this is. Neither is live yet: see openWallet. -->
+        <div class="wallet cashbar" aria-label="USDG wallet">
+          <span
+            class="pill pill--usdg"
+            id="wallet-usdg-pill"
+            title="USDG -- open wallet"
+            role="button"
+            tabindex="0"
+            aria-haspopup="dialog"
+          >
+            <i class="pill__icon" aria-hidden="true"></i><b id="hud-usdg">$0.00</b>
+          </span>
+          <button
+            class="btn btn--deposit"
+            id="btn-deposit"
+            type="button"
+            title="Add USDG to your wallet"
+            aria-haspopup="dialog"
+          >Deposit</button>
+        </div>
+      </header>
+
+      <!-- Side panels -->
+      <aside class="side side--right">
+        <section class="panel board" id="panel-players">
+          <h2 class="panel__title">Online <span id="hud-online-count">(0)</span></h2>
+          <ul class="board__list board__list--plain" id="hud-players"></ul>
+        </section>
+      </aside>
+
+      <!-- Bottom-left: chat -->
+      <section class="panel chat" id="panel-chat">
+        <!-- Title rail: the label opens the composer, the small button beside
+             it minimizes the whole card down to this rail. Two jobs, two
+             controls -- one button doing both was the ambiguity here. -->
+        <div class="chat__rail">
+          <button class="chat__toggle" id="btn-chat-toggle" type="button" aria-expanded="true">
+            Chat
+            <span class="chat__unread" id="hud-chat-unread" aria-hidden="true"></span>
+          </button>
+          <button
+            class="chat__min"
+            id="btn-chat-min"
+            type="button"
+            aria-controls="hud-chat"
+            aria-expanded="true"
+            aria-label="Minimize chat"
+            title="Minimize chat"
+          ></button>
+        </div>
+        <ol class="chat__log" id="hud-chat"></ol>
+        <form class="chat__form" id="hud-chat-form">
+          <input
+            id="hud-chat-input"
+            class="chat__input"
+            type="text"
+            maxlength="200"
+            autocomplete="off"
+            placeholder="Say something"
+            aria-label="Chat message"
+          />
+          <button class="btn btn--send" type="submit">Send</button>
+        </form>
+      </section>
+
+      <!-- Bottom-centre: the cast in progress, over one control bar.
+           Auto-fishing, the Stake, and the rod's level + level-up affordance
+           were three separate boxes; they are one panel now, divided by
+           hairlines, because they are the things a player touches mid-run and
+           they belong under the same hand.
+
+           Stake is the game's only risk lever, so the row the Dial cards used
+           to occupy is now the read-out for it: the chosen rung's name, what
+           it trades away, and what it can win. That has to be visible rather
+           than hover text -- a stake row that only ever showed numbers is how
+           the old UI managed to communicate pure upside for a control that is
+           a trade-off in both directions. -->
+      <div class="dials">
+        <section class="panel cast" id="hud-cast" aria-live="polite">
+          <div class="cast__label" id="hud-cast-label">Waiting</div>
+          <div class="cast__track"><div class="cast__fill" id="hud-cast-fill"></div></div>
+        </section>
+
+        <div class="panel dials__row">
+          <div class="dials__seg dials__seg--auto">
+            <button
+              class="iconbtn iconbtn--rod"
+              id="btn-auto"
+              type="button"
+              aria-pressed="true"
+              title="Toggle auto-fishing"
+            >
+              <span class="iconbtn__label">Auto</span>
+            </button>
+          </div>
+
+          <section class="control dials__seg dials__seg--controls" id="panel-stake">
+            <!-- The Risk Dial, as a gauge rather than a switch. All three
+                 bands are always shown; the one the current Stake falls in is
+                 lit. Deliberately not buttons -- there is nothing to click,
+                 and rendering them as controls would invite the player to try.
+                 role="img" with a label is how a screen reader gets the same
+                 one-glance reading a sighted player gets from the lit card. -->
+            <div class="riskdial" id="hud-riskdial" role="img" aria-label="Risk dial"></div>
+
+            <div class="stakerow">
+              <span class="stakerow__label" id="hud-stake-label">Stake</span>
+              <div class="chiprow" id="hud-stakes" role="group" aria-label="Stake"></div>
+            </div>
+
+            <!-- What the chosen rung actually costs and wins. Updated from the
+                 catalog, never written out here. -->
+            <p class="stakenote" id="hud-stake-note" aria-live="polite">&mdash;</p>
+
+            <!-- Kept for screen readers; visually hidden -- the full explainer
+                 lives in the section's title tooltip instead. -->
+            <p class="control__hint sr-only" id="hud-stake-hint">&mdash;</p>
+          </section>
+
+          <div class="rodpanel dials__seg dials__seg--rod" id="hud-rodpanel">
+            <span class="rodpanel__level" id="hud-rod-level">Lv.1</span>
+            <div class="rodpanel__track" title="Fishing Power to next level">
+              <div class="rodpanel__fill" id="hud-rod-fill"></div>
+            </div>
+            <button class="rodpanel__cta" id="btn-rod-levelup" type="button" hidden>
+              Level Up!
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom-right: actions and the inventory grid -->
+      <div class="bagzone">
+        <div class="iconbar" role="group" aria-label="Actions">
+          <button class="iconbtn iconbtn--shop" id="btn-shop" type="button" title="Shop">
+            <span class="iconbtn__label">Shop</span>
+          </button>
+          <button class="iconbtn iconbtn--map" id="btn-log" type="button" title="Catch log and record">
+            <span class="iconbtn__label">Log</span>
+          </button>
+          <button
+            class="iconbtn iconbtn--cashin"
+            id="btn-cashin"
+            type="button"
+            title="Cash in caught fish for Fishing Power"
+          >
+            <span class="iconbtn__label">Cash In</span>
+          </button>
+          <button
+            class="iconbtn iconbtn--trophy"
+            id="btn-leaderboard"
+            type="button"
+            title="Top anglers leaderboard"
+          >
+            <span class="iconbtn__label">Ranks</span>
+          </button>
+          <button
+            class="iconbtn iconbtn--bag iconbtn--mobile-bag"
+            type="button"
+            data-toggle-side="#hud-bag-panel"
+            title="Open quick bag"
+          >
+            <span class="iconbtn__label">Bag</span>
+          </button>
+          <button
+            class="iconbtn iconbtn--boat iconbtn--side"
+            id="btn-online"
+            type="button"
+            data-toggle-side=".side--right"
+            title="Players online"
+          >
+            <span class="iconbtn__label">Online</span>
+          </button>
+        </div>
+
+        <section class="panel bag" id="hud-bag-panel" aria-label="Quick catch bag">
+          <h2 class="panel__title">
+            Quick bag <span class="bag__count" id="hud-bag-count"></span>
+          </h2>
+          <div class="baggrid" id="hud-bag" role="list"></div>
+        </section>
+      </div>
+
+      <!-- Status strip: fishable hint, connection state -->
+      <div class="status" id="hud-status" hidden></div>
+
+      <!-- Pickup banners: BOTW-style "you got an item" strips at the right
+           edge, for things that land in the bag (a catch, a chest found). -->
+      <div class="pickups" id="hud-pickups" aria-live="polite"></div>
+    </div>
+
+    <!-- Toasts: a body-level sibling, not a child of `.hud`. `.hud` is its own
+         stacking context (`position: fixed` + `z-index: 10`), so a toast fired
+         while a modal is open -- e.g. clicking an action inside the Gold
+         Wallet or Cash In panels -- could not out-rank the modal's z-index:40
+         scrim no matter how high its own z-index went; it would render, just
+         invisibly behind it. Living out here instead puts it in the same
+         stacking context as `.modal` and `.gate`, where its own z-index (see
+         style.css) actually has something to win against. -->
+    <div class="toasts" id="hud-toasts" aria-live="polite"></div>
+
+    <!-- --------------------------------------------------------- modals -->
+    <div class="modal" id="modal" hidden>
+      <div class="modal__scrim" data-close="1"></div>
+      <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <header class="modal__head">
+          <h2 class="modal__title" id="modal-title">&mdash;</h2>
+          <!-- Only the full-screen modals use this; the rest leave it hidden. -->
+          <p class="modal__subtitle" id="modal-subtitle" hidden></p>
+          <button class="modal__close" data-close="1" type="button" aria-label="Close">&times;</button>
+        </header>
+        <div class="modal__body" id="modal-body"></div>
+
+        <!-- The bait seller, leaning in from beside the counter. He belongs to
+             the shop alone, so he lives here hidden and `setModalChrome` shows
+             him; keeping him in the card rather than in the scrolling body is
+             what lets him sit outside its edge without being clipped. -->
+        <img class="keeper" id="modal-keeper" src="/assets/shopkeeper.png"
+             alt="The harbour's bait seller at his counter" hidden>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

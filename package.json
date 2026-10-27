@@ -1,0 +1,20 @@
+{
+  "name": "fishing-idle-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fishing Idle Game MMO -- Phaser 3 client, Colyseus + MongoDB server",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "test": "npm --prefix server test && npm --prefix client run test:level",
+    "verify": "npm test && npm run build",
+    "smoke": "npm --prefix client run smoke",
+    "balance": "node server/tools/balance.js",
+    "build": "npm --prefix client run build",
+    "seed": "npm --prefix server run seed"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

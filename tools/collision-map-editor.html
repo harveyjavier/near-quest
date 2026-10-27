@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Harbor Collision Map Editor</title>
+<style>
+  :root {
+    --bg: #1b1d22;
+    --panel: #24272e;
+    --panel-border: #383c46;
+    --text: #e8e9ec;
+    --text-dim: #9aa0ab;
+    --accent: #4da3ff;
+    --solid: #e0433f;
+    --water: #3c8cff;
+    --deck: #d2b478;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 14px;
+  }
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  header {
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-border);
+  }
+  header h1 { font-size: 16px; margin: 0 0 2px; font-weight: 600; }
+  header p { margin: 0; color: var(--text-dim); font-size: 12px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .group {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    background: #1f2228;
+  }
+  .group label { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+  button {
+    background: #2c303a; color: var(--text);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  button:hover { background: #363b46; }
+  button.active { background: var(--accent); border-color: var(--accent); color: #0c1420; font-weight: 600; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0c1420; font-weight: 600; }
+  button.primary:hover { background: #6db3ff; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  input[type="file"] { display: none; }
+  input[type="range"] { width: 90px; }
+  .fileLabel {
+    background: #2c303a; border: 1px solid var(--panel-border); border-radius: 5px;
+    padding: 6px 10px; font-size: 12.5px; cursor: pointer;
+  }
+  .fileLabel:hover { background: #363b46; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
+
+  main {
+    flex: 1; display: flex; min-height: 0;
+  }
+  .viewport {
+    flex: 1; overflow: auto; background: #101114;
+    background-image:
+      linear-gradient(45deg, #16171b 25%, transparent 25%),
+      linear-gradient(-45deg, #16171b 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #16171b 75%),
+      linear-gradient(-45deg, transparent 75%, #16171b 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    padding: 24px;
+    position: relative;
+  }
+  #stage {
+    position: relative;
+    display: inline-block;
+    box-shadow: 0 0 0 1px #000, 0 8px 30px rgba(0,0,0,0.5);
+  }
+  canvas { display: block; image-rendering: pixelated; }
+
+  aside {
+    width: 260px; flex: none;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    padding: 14px;
+    overflow-y: auto;
+  }
+  aside h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin: 18px 0 8px; }
+  aside h2:first-child { margin-top: 0; }
+  aside p { color: var(--text-dim); font-size: 12.5px; line-height: 1.5; margin: 0 0 8px; }
+  .stat-row { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; color: var(--text-dim); }
+  .stat-row b { color: var(--text); font-weight: 600; }
+  .legend-row { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-dim); padding: 2px 0; }
+  kbd {
+    background: #1b1e24; border: 1px solid var(--panel-border); border-radius: 3px;
+    padding: 1px 5px; font-size: 11px; font-family: inherit;
+  }
+  ol, ul { margin: 0 0 8px; padding-left: 18px; color: var(--text-dim); font-size: 12.5px; line-height: 1.6; }
+  .note {
+    background: #26241a; border: 1px solid #4d4326; color: #e8d9a0;
+    border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.5; margin-top: 4px;
+  }
+
+  footer {
+    padding: 6px 16px; background: var(--panel); border-top: 1px solid var(--panel-border);
+    font-size: 12px; color: var(--text-dim);
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  #status b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Harbor Collision Map Editor</h1>
+  <p>Paint the walkable / blocked grid used by pathfind.js and movement. Left-drag = block, right-drag = clear. Edits export to <code>collision-grid.json</code>.</p>
+</header>
+
+<div class="toolbar">
+  <div class="group">
+    <button id="brushBlock" class="active" title="Left-click paints this">Block (left-click)</button>
+    <button id="brushClear" title="Right-click always clears">Clear (right-click)</button>
+  </div>
+
+  <div class="group">
+    <label>Grid</label>
+    <button id="toggleGrid" class="active">Lines</button>
+  </div>
+
+  <div class="group">
+    <label><span class="swatch" style="background:var(--water)"></span>Water</label>
+    <button id="toggleWater" class="active">Show</button>
+    <label style="margin-left:6px"><span class="swatch" style="background:var(--deck)"></span>Deck</label>
+    <button id="toggleDeck" class="active">Show</button>
+  </div>
+
+  <div class="group">
+    <label>Overlay</label>
+    <input type="range" id="opacity" min="10" max="90" value="55" />
+  </div>
+
+  <div class="group">
+    <label>Zoom</label>
+    <button id="zoomOut">&minus;</button>
+    <span id="zoomLabel" style="width:42px; text-align:center; display:inline-block;">100%</span>
+    <button id="zoomIn">+</button>
+    <button id="zoomFit">Fit</button>
+  </div>
+
+  <div class="group">
+    <button id="undoBtn" disabled>&#8630; Undo</button>
+    <button id="redoBtn" disabled>&#8631; Redo</button>
+  </div>
+
+  <div class="group">
+    <label class="fileLabel" for="loadImage">Load background image&hellip;</label>
+    <input type="file" id="loadImage" accept="image/*" />
+    <label class="fileLabel" for="loadJson">Load collision JSON&hellip;</label>
+    <input type="file" id="loadJson" accept="application/json" />
+    <button id="resetBtn">Reset to current map</button>
+  </div>
+
+  <div class="group" style="margin-left:auto;">
+    <button id="exportBtn" class="primary">Download collision-grid.json</button>
+  </div>
+</div>
+
+<main>
+  <div class="viewport" id="viewport">
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+
+  <aside>
+    <h2>How this works</h2>
+    <ol>
+      <li>Red tiles are <b>solid</b> (blocked) &mdash; this is the actual collision box the player and pathfinding use.</li>
+      <li>Blue/tan tiles are water and dock <b>reference only</b>, shown for context. They are not edited here.</li>
+      <li>Left-drag to block tiles, right-drag to clear them. Click once to toggle a single tile.</li>
+      <li>When you're happy, click <b>Download collision-grid.json</b>.</li>
+      <li>Move the downloaded file into <code>client/src/world/collision-grid.json</code>, replacing the existing one. Refresh the game to see it live &mdash; no code changes needed.</li>
+    </ol>
+    <div class="note">
+      The background image loads from <code>../client/public/assets/harbor-environment.png</code> relative to this file. If it doesn't appear (e.g. you moved this file), use "Load background image&hellip;" and pick that PNG manually &mdash; the grid still works without it.
+    </div>
+
+    <h2>Shortcuts</h2>
+    <p><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &nbsp; <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo &nbsp; <kbd>G</kbd> toggle grid</p>
+
+    <h2>Legend</h2>
+    <div class="legend-row"><span class="swatch" style="background:var(--solid)"></span> Solid (blocked)</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--water)"></span> Water (reference)</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--deck)"></span> Deck / pier (reference)</div>
+
+    <h2>Grid stats</h2>
+    <div class="stat-row"><span>Columns &times; Rows</span><b id="statDims">&ndash;</b></div>
+    <div class="stat-row"><span>Tile size</span><b id="statTile">&ndash;</b></div>
+    <div class="stat-row"><span>Solid tiles</span><b id="statSolid">&ndash;</b></div>
+    <div class="stat-row"><span>Walkable tiles</span><b id="statWalkable">&ndash;</b></div>
+  </aside>
+</main>
+
+<footer>
+  <span id="status">Move the mouse over the map to inspect a tile.</span>
+  <span id="dirty"></span>
+</footer>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Baseline grid: exactly what client/src/world/level.js currently computes
+// (isWater() + PIERS + prop rects + rail overrides), captured on the day this
+// tool was built. Editing here never touches level.js's own logic -- it only
+// edits this data. Load a fresher collision-grid.json with the button above
+// if the map's base layout changes later.
+// ---------------------------------------------------------------------------
+const DEFAULT_GRID = {"tile":32,"columns":48,"rows":32,"solid":[[true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true],[true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,true],[true,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,false,false,false,false,false,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,true,false,false,false,false,false,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,false,false,false,false,false,true],[true,false,false,false,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,true],[true,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,true],[true,false,false,false,true,true,true,true,true,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,true,true,true,true,true,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true],[true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true]],"reference":{"water":[[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false],[false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false],[false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false],[false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false],[false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false],[false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false],[false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false]],"deck":[[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,true,true,true,true,true,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false]]}};
+
+const IMAGE_RELATIVE_PATH = "../client/public/assets/harbor-environment.png";
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let grid = cloneGrid(DEFAULT_GRID);
+let bgImage = null;
+let bgReady = false;
+
+let zoom = 1;
+let showGrid = true;
+let showWater = true;
+let showDeck = true;
+let overlayOpacity = 0.55;
+let eraseMode = false; // left-click behaviour toggle (right-click is always erase)
+
+let undoStack = [];
+let redoStack = [];
+let isPainting = false;
+let paintValue = true;
+let lastPaintedTile = null;
+let dirty = false;
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const stage = document.getElementById("stage");
+const viewport = document.getElementById("viewport");
+
+// ---------------------------------------------------------------------------
+// Grid helpers
+// ---------------------------------------------------------------------------
+function cloneGrid(g) {
+  return {
+    tile: g.tile,
+    columns: g.columns,
+    rows: g.rows,
+    solid: g.solid.map((row) => row.slice()),
+    reference: {
+      water: (g.reference && g.reference.water ? g.reference.water : []).map((row) => row.slice()),
+      deck: (g.reference && g.reference.deck ? g.reference.deck : []).map((row) => row.slice()),
+    },
+  };
+}
+
+function cloneSolid(solid) {
+  return solid.map((row) => row.slice());
+}
+
+function inBounds(tx, ty) {
+  return tx >= 0 && ty >= 0 && tx < grid.columns && ty < grid.rows;
+}
+
+function canvasSize() {
+  return { w: grid.columns * grid.tile, h: grid.rows * grid.tile };
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+function resizeCanvas() {
+  const { w, h } = canvasSize();
+  canvas.width = w;
+  canvas.height = h;
+  canvas.style.width = Math.round(w * zoom) + "px";
+  canvas.style.height = Math.round(h * zoom) + "px";
+}
+
+function draw() {
+  const { w, h } = canvasSize();
+  ctx.clearRect(0, 0, w, h);
+
+  if (bgReady) {
+    ctx.drawImage(bgImage, 0, 0, w, h);
+  } else {
+    ctx.fillStyle = "#2a2d33";
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const T = grid.tile;
+
+  if (showWater && grid.reference.water.length) {
+    ctx.fillStyle = "rgba(60,140,255,0.20)";
+    for (let y = 0; y < grid.rows; y++) {
+      const row = grid.reference.water[y];
+      if (!row) continue;
+      for (let x = 0; x < grid.columns; x++) {
+        if (row[x]) ctx.fillRect(x * T, y * T, T, T);
+      }
+    }
+  }
+
+  if (showDeck && grid.reference.deck.length) {
+    ctx.fillStyle = "rgba(210,180,120,0.28)";
+    for (let y = 0; y < grid.rows; y++) {
+      const row = grid.reference.deck[y];
+      if (!row) continue;
+      for (let x = 0; x < grid.columns; x++) {
+        if (row[x]) ctx.fillRect(x * T, y * T, T, T);
+      }
+    }
+  }
+
+  ctx.fillStyle = `rgba(224,67,63,${overlayOpacity})`;
+  for (let y = 0; y < grid.rows; y++) {
+    const row = grid.solid[y];
+    for (let x = 0; x < grid.columns; x++) {
+      if (row[x]) ctx.fillRect(x * T, y * T, T, T);
+    }
+  }
+
+  if (showGrid) {
+    ctx.strokeStyle = "rgba(255,255,255,0.14)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= grid.columns; x++) {
+      ctx.moveTo(x * T + 0.5, 0);
+      ctx.lineTo(x * T + 0.5, h);
+    }
+    for (let y = 0; y <= grid.rows; y++) {
+      ctx.moveTo(0, y * T + 0.5);
+      ctx.lineTo(w, y * T + 0.5);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.32)";
+    ctx.beginPath();
+    for (let x = 0; x <= grid.columns; x += 4) {
+      ctx.moveTo(x * T + 0.5, 0);
+      ctx.lineTo(x * T + 0.5, h);
+    }
+    for (let y = 0; y <= grid.rows; y += 4) {
+      ctx.moveTo(0, y * T + 0.5);
+      ctx.lineTo(w, y * T + 0.5);
+    }
+    ctx.stroke();
+  }
+
+  if (hoverTile && inBounds(hoverTile.tx, hoverTile.ty)) {
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(hoverTile.tx * T + 1, hoverTile.ty * T + 1, T - 2, T - 2);
+  }
+
+  updateStats();
+}
+
+function updateStats() {
+  let solidCount = 0;
+  for (const row of grid.solid) for (const v of row) if (v) solidCount++;
+  const total = grid.columns * grid.rows;
+  document.getElementById("statDims").textContent = `${grid.columns} × ${grid.rows}`;
+  document.getElementById("statTile").textContent = `${grid.tile}px`;
+  document.getElementById("statSolid").textContent = `${solidCount} (${Math.round((solidCount / total) * 100)}%)`;
+  document.getElementById("statWalkable").textContent = `${total - solidCount}`;
+}
+
+function setDirty(v) {
+  dirty = v;
+  document.getElementById("dirty").textContent = v ? "Unsaved edits — remember to download & replace the file in client/src/world/" : "";
+}
+
+// ---------------------------------------------------------------------------
+// Background image
+// ---------------------------------------------------------------------------
+function loadImageFromUrl(url) {
+  const img = new Image();
+  img.onload = () => {
+    bgImage = img;
+    bgReady = true;
+    draw();
+  };
+  img.onerror = () => {
+    bgReady = false;
+    document.getElementById("status").textContent =
+      "Background image not found at " + IMAGE_RELATIVE_PATH + " — use \"Load background image…\" to pick it manually.";
+  };
+  img.src = url;
+}
+loadImageFromUrl(IMAGE_RELATIVE_PATH);
+
+document.getElementById("loadImage").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  loadImageFromUrl(url);
+});
+
+// ---------------------------------------------------------------------------
+// Load / reset / export JSON
+// ---------------------------------------------------------------------------
+document.getElementById("loadJson").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!Array.isArray(parsed.solid) || !parsed.solid.length) throw new Error("missing solid[][]");
+      grid = cloneGrid({
+        tile: parsed.tile || 32,
+        columns: parsed.columns || parsed.solid[0].length,
+        rows: parsed.rows || parsed.solid.length,
+        solid: parsed.solid,
+        reference: parsed.reference || { water: [], deck: [] },
+      });
+      undoStack = [];
+      redoStack = [];
+      updateUndoRedoButtons();
+      resizeCanvas();
+      draw();
+      setDirty(false);
+      document.getElementById("status").textContent = "Loaded " + file.name;
+    } catch (err) {
+      alert("Couldn't read that file as a collision grid: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  if (dirty && !confirm("Discard unsaved edits and reset to the current map's collision?")) return;
+  grid = cloneGrid(DEFAULT_GRID);
+  undoStack = [];
+  redoStack = [];
+  updateUndoRedoButtons();
+  resizeCanvas();
+  draw();
+  setDirty(false);
+});
+
+function formatGrid(g) {
+  const rowLine = (row) => "    [" + row.map((v) => (v ? "true" : "false")).join(",") + "]";
+  const solidLines = g.solid.map(rowLine).join(",\n");
+  const waterLines = (g.reference.water.length ? g.reference.water : g.solid.map(() => g.solid[0].map(() => false))).map(rowLine).join(",\n");
+  const deckLines = (g.reference.deck.length ? g.reference.deck : g.solid.map(() => g.solid[0].map(() => false))).map(rowLine).join(",\n");
+  return `{
+  "tile": ${g.tile},
+  "columns": ${g.columns},
+  "rows": ${g.rows},
+  "solid": [
+${solidLines}
+  ],
+  "reference": {
+    "water": [
+${waterLines}
+    ],
+    "deck": [
+${deckLines}
+    ]
+  }
+}
+`;
+}
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const text = formatGrid(grid);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "collision-grid.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setDirty(false);
+  document.getElementById("status").textContent =
+    "Downloaded collision-grid.json — move it into client/src/world/, replacing the existing file.";
+});
+
+// ---------------------------------------------------------------------------
+// Undo / redo
+// ---------------------------------------------------------------------------
+function pushUndo() {
+  undoStack.push(cloneSolid(grid.solid));
+  if (undoStack.length > 200) undoStack.shift();
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(cloneSolid(grid.solid));
+  grid.solid = undoStack.pop();
+  updateUndoRedoButtons();
+  draw();
+  setDirty(true);
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(cloneSolid(grid.solid));
+  grid.solid = redoStack.pop();
+  updateUndoRedoButtons();
+  draw();
+  setDirty(true);
+}
+
+function updateUndoRedoButtons() {
+  document.getElementById("undoBtn").disabled = undoStack.length === 0;
+  document.getElementById("redoBtn").disabled = redoStack.length === 0;
+}
+
+document.getElementById("undoBtn").addEventListener("click", undo);
+document.getElementById("redoBtn").addEventListener("click", redo);
+
+// ---------------------------------------------------------------------------
+// Painting
+// ---------------------------------------------------------------------------
+function eventToTile(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const cx = (e.clientX - rect.left) * scaleX;
+  const cy = (e.clientY - rect.top) * scaleY;
+  return { tx: Math.floor(cx / grid.tile), ty: Math.floor(cy / grid.tile), px: Math.round(cx), py: Math.round(cy) };
+}
+
+function paintTile(tx, ty, value) {
+  if (!inBounds(tx, ty)) return;
+  if (grid.solid[ty][tx] === value) return;
+  grid.solid[ty][tx] = value;
+  setDirty(true);
+}
+
+function paintLine(from, to, value) {
+  // Simple stepped walk so a fast drag doesn't skip tiles between samples.
+  let { tx: x0, ty: y0 } = from;
+  const { tx: x1, ty: y1 } = to;
+  const dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  const dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    paintTile(x0, y0, value);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+
+let hoverTile = null;
+
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+canvas.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  const tile = eventToTile(e);
+  if (!inBounds(tile.tx, tile.ty)) return;
+  pushUndo();
+  paintValue = e.button === 2 ? false : !eraseMode;
+  isPainting = true;
+  lastPaintedTile = tile;
+  paintTile(tile.tx, tile.ty, paintValue);
+  draw();
+});
+
+window.addEventListener("mousemove", (e) => {
+  const tile = eventToTile(e);
+  const overCanvas = e.target === canvas;
+  hoverTile = overCanvas && inBounds(tile.tx, tile.ty) ? tile : null;
+
+  if (isPainting && inBounds(tile.tx, tile.ty)) {
+    if (lastPaintedTile) paintLine(lastPaintedTile, tile, paintValue);
+    else paintTile(tile.tx, tile.ty, paintValue);
+    lastPaintedTile = tile;
+  }
+
+  if (hoverTile) {
+    const state = grid.solid[hoverTile.ty][hoverTile.tx] ? "BLOCKED" : "walkable";
+    document.getElementById("status").innerHTML =
+      `Tile <b>(${hoverTile.tx}, ${hoverTile.ty})</b> · pixel (${tile.px}, ${tile.py}) · <b>${state}</b>`;
+  }
+  draw();
+});
+
+window.addEventListener("mouseup", () => {
+  if (isPainting) {
+    isPainting = false;
+    lastPaintedTile = null;
+    updateUndoRedoButtons();
+  }
+});
+
+viewport.addEventListener("mouseleave", () => {
+  if (!isPainting) {
+    hoverTile = null;
+    draw();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Toolbar wiring
+// ---------------------------------------------------------------------------
+function setBrush(erase) {
+  eraseMode = erase;
+  document.getElementById("brushBlock").classList.toggle("active", !erase);
+  document.getElementById("brushClear").classList.toggle("active", erase);
+}
+document.getElementById("brushBlock").addEventListener("click", () => setBrush(false));
+document.getElementById("brushClear").addEventListener("click", () => setBrush(true));
+
+document.getElementById("toggleGrid").addEventListener("click", (e) => {
+  showGrid = !showGrid;
+  e.target.classList.toggle("active", showGrid);
+  draw();
+});
+document.getElementById("toggleWater").addEventListener("click", (e) => {
+  showWater = !showWater;
+  e.target.classList.toggle("active", showWater);
+  draw();
+});
+document.getElementById("toggleDeck").addEventListener("click", (e) => {
+  showDeck = !showDeck;
+  e.target.classList.toggle("active", showDeck);
+  draw();
+});
+document.getElementById("opacity").addEventListener("input", (e) => {
+  overlayOpacity = Number(e.target.value) / 100;
+  draw();
+});
+
+function setZoom(z) {
+  zoom = Math.max(0.25, Math.min(4, z));
+  document.getElementById("zoomLabel").textContent = Math.round(zoom * 100) + "%";
+  resizeCanvas();
+  draw();
+}
+document.getElementById("zoomIn").addEventListener("click", () => setZoom(zoom + 0.25));
+document.getElementById("zoomOut").addEventListener("click", () => setZoom(zoom - 0.25));
+document.getElementById("zoomFit").addEventListener("click", () => {
+  const { w, h } = canvasSize();
+  const availW = viewport.clientWidth - 48;
+  const availH = viewport.clientHeight - 48;
+  setZoom(Math.min(availW / w, availH / h, 1));
+});
+
+window.addEventListener("keydown", (e) => {
+  const ctrlLike = e.ctrlKey || e.metaKey;
+  if (ctrlLike && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (ctrlLike && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) { e.preventDefault(); redo(); }
+  else if (!ctrlLike && e.key.toLowerCase() === "g" && e.target === document.body) {
+    document.getElementById("toggleGrid").click();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+resizeCanvas();
+setDirty(false);
+setTimeout(() => document.getElementById("zoomFit").click(), 0);
+draw();
+</script>
+</body>
+</html>

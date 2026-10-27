@@ -1,0 +1,8 @@
+{
+  "image": "pearl.png",
+  "frameWidth": 12,
+  "frameHeight": 12,
+  "frames": {
+    "pearls": 0
+  }
+}

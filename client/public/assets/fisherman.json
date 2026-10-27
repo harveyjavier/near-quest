@@ -1,0 +1,59 @@
+{
+  "image": "fisherman.png",
+  "frameWidth": 96,
+  "frameHeight": 96,
+  "columns": 4,
+  "feetY": 64,
+  "bodyHeight": 48,
+  "poses": {
+    "walk-down": {
+      "row": 0,
+      "frames": 4
+    },
+    "walk-right": {
+      "row": 1,
+      "frames": 4
+    },
+    "walk-up": {
+      "row": 2,
+      "frames": 4
+    },
+    "walk-left": {
+      "row": 3,
+      "frames": 4
+    },
+    "fish-down": {
+      "row": 4,
+      "frames": 4,
+      "rodTip": {
+        "x": 18,
+        "y": -1
+      }
+    },
+    "fish-right": {
+      "row": 5,
+      "frames": 4,
+      "rodTip": {
+        "x": 22,
+        "y": -20
+      }
+    },
+    "fish-up": {
+      "row": 6,
+      "frames": 4,
+      "rodTip": {
+        "x": 22,
+        "y": -20
+      }
+    },
+    "fish-left": {
+      "row": 7,
+      "frames": 4,
+      "rodTip": {
+        "x": -23,
+        "y": -16
+      }
+    }
+  },
+  "source": "character-base.png"
+}

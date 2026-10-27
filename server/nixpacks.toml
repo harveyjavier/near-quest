@@ -1,0 +1,7 @@
+# Colyseus needs a persistent Node process. Pin the runtime so Railway does not
+# swap in a version the WebSocket transport has not been tested against.
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[start]
+cmd = "node src/index.js"

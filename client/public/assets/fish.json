@@ -1,0 +1,13 @@
+{
+  "image": "fish.png",
+  "frameWidth": 45,
+  "frameHeight": 39,
+  "frames": {
+    "muddy_carp": 0,
+    "speckled_trout": 1,
+    "whiskered_catfish": 2,
+    "golden_koi": 3,
+    "moonfish": 4,
+    "leviathan": 5
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "fishing-idle-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Server-authoritative Colyseus + MongoDB backend for Fishing Idle Game MMO",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/db/seed.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.18.19",
+    "@colyseus/schema": "^5.0.41",
+    "@colyseus/ws-transport": "^0.18.4",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "mongoose": "^9.9.4"
+  }
+}

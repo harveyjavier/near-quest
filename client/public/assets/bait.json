@@ -1,0 +1,8 @@
+{
+  "image": "bait.png",
+  "frameWidth": 14,
+  "frameHeight": 14,
+  "frames": {
+    "bait": 0
+  }
+}

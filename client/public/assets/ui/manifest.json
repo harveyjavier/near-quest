@@ -1,0 +1,13 @@
+{
+  "source": "fishing-ui-sprite-atlas-16x16-v1.png",
+  "sprites": {
+    "slot": {
+      "width": 112,
+      "height": 115
+    },
+    "slot-gold": {
+      "width": 112,
+      "height": 115
+    }
+  }
+}
