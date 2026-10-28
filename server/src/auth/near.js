@@ -65,11 +65,19 @@ export function issueNonce(now = Date.now()) {
   return nonce;
 }
 
-/** One use only, whatever the outcome, so a signature can never be replayed. */
+function nonceIsLive(nonce, now) {
+  return pending.get(nonce) > now;
+}
+
+/**
+ * Spends a nonce. Only done once a session is actually issued, so a sign-in
+ * refused with SWITCH_REQUIRED can be confirmed without signing again. Check
+ * and delete happen in one synchronous step, so two requests can't both win.
+ */
 function consumeNonce(nonce, now) {
-  const expiresAt = pending.get(nonce);
+  const live = nonceIsLive(nonce, now);
   pending.delete(nonce);
-  return expiresAt !== undefined && expiresAt > now;
+  return live;
 }
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -141,7 +149,7 @@ export async function verifyNearSignIn(body, { fetchAccessKey = rpcAccessKey, no
   if (callbackUrl !== null && (typeof callbackUrl !== 'string' || callbackUrl.length > 2048)) {
     throw new ValidationError('BAD_SIGNATURE', 'Invalid callback URL.');
   }
-  if (!consumeNonce(nonce, now)) {
+  if (!nonceIsLive(nonce, now)) {
     throw new ValidationError('BAD_NONCE', 'Sign-in expired. Please try again.');
   }
 
@@ -184,11 +192,32 @@ export async function verifyNearSignIn(body, { fetchAccessKey = rpcAccessKey, no
  * a leaked localStorage) stops working. `releaseSession` saves and evicts a
  * live seat on the old token first, so the room never writes back under it.
  */
+/** Refused before anything changes, so the player can still say no. */
+function switchRequired(player) {
+  const error = new ValidationError('SWITCH_REQUIRED', 'This wallet already has a save.');
+  error.details = { accountId: player.nearAccountId, displayName: player.displayName };
+  return error;
+}
+
 export async function signInWithNear(body, { releaseSession = async () => {}, ...options } = {}) {
   const accountId = await verifyNearSignIn(body, options);
   const repo = getRepo();
 
   let player = await repo.findPlayerByNearAccount(accountId);
+
+  // The wallet owns a save and this device holds a different, unbound guest
+  // save: switching would leave the guest behind, so ask first.
+  if (player && body.allowSwitch !== true && isValidSessionToken(body.sessionToken)
+      && body.sessionToken !== player.sessionToken) {
+    const guest = await repo.findPlayerByToken(body.sessionToken);
+    if (guest && !guest.nearAccountId) throw switchRequired(player);
+  }
+
+  // Everything above is read-only. From here on the sign-in commits.
+  if (!consumeNonce(body.nonce, options.now ?? Date.now())) {
+    throw new ValidationError('BAD_NONCE', 'Sign-in expired. Please try again.');
+  }
+
   let source = 'existing';
   if (!player && isValidSessionToken(body.sessionToken) && await repo.bindNearAccount(body.sessionToken, accountId)) {
     player = await repo.findPlayerByToken(body.sessionToken);

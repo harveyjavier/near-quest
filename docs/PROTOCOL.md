@@ -24,7 +24,7 @@ name is `harbor`. The client joins with `joinOrCreate`.
 | `GET` | `/catalog` | The full `CLIENT_CATALOG` payload (same object sent on join) |
 | `GET` | `/` | `{ name, endpoints }` |
 | `GET` | `/auth/near/challenge` | `{ nonce, message, recipient, network }`. The nonce works once and expires after 5 minutes. |
-| `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 429 / 503 |
+| `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName?, allowSwitch? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 409 / 429 / 503 |
 
 `database` is `"mongodb"` or `"memory"`. In production it must read
 `"mongodb"` — see [OPERATIONS.md](OPERATIONS.md).
@@ -44,6 +44,13 @@ Which player you get:
 3. Otherwise a new player (`source: "new"`).
 
 One wallet has at most one player.
+
+If the wallet already has a player and `sessionToken` is a different guest
+save that isn't bound to any wallet, the server answers **409
+`{ code: "SWITCH_REQUIRED", accountId, displayName }`** and changes nothing:
+no token rotates, nobody is kicked, and the nonce is still valid. The client
+asks the player, and on yes resends the same signed body with
+`allowSwitch: true`. A nonce is only spent by a sign-in that issues a session.
 
 Each sign-in gives the player a new `sessionToken`. The old one stops working,
 and anyone seated on it is saved and kicked with code 4001. A wallet device

@@ -78,11 +78,11 @@ async function main() {
   app.get('/catalog', (_request, response) => response.json(CLIENT_CATALOG));
 
   // NEAR wallet sign-in: fetch a one-time challenge, sign it, post it back.
-  const AUTH_STATUS = { RATE_LIMITED: 429, BUSY: 503, NEAR_UNAVAILABLE: 503 };
+  const AUTH_STATUS = { RATE_LIMITED: 429, BUSY: 503, NEAR_UNAVAILABLE: 503, SWITCH_REQUIRED: 409 };
   const authError = (response, error) => {
     if (error.code === 11000) return response.status(409).json({ error: 'That wallet was just linked elsewhere. Try again.' });
     if (error.name !== 'ValidationError') throw error;
-    response.status(AUTH_STATUS[error.code] ?? 401).json({ code: error.code, error: error.message });
+    response.status(AUTH_STATUS[error.code] ?? 401).json({ ...error.details, code: error.code, error: error.message });
   };
   app.get('/auth/near/challenge', (request, response) => {
     try {

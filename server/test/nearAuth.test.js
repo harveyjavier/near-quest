@@ -38,12 +38,6 @@ describe('verifyNearSignIn', () => {
     assert.equal(await verifyNearSignIn(signedBody('alice.testnet'), fullAccess), 'alice.testnet');
   });
 
-  it('rejects a replayed nonce', async () => {
-    const body = signedBody('alice.testnet');
-    await verifyNearSignIn(body, fullAccess);
-    await assert.rejects(verifyNearSignIn(body, fullAccess), { code: 'BAD_NONCE' });
-  });
-
   it('rejects a forged signature', async () => {
     const body = { ...signedBody('alice.testnet'), signature: Buffer.alloc(64).toString('base64') };
     await assert.rejects(verifyNearSignIn(body, fullAccess), { code: 'BAD_SIGNATURE' });
@@ -112,5 +106,36 @@ describe('signInWithNear', () => {
     assert.equal(result.displayName, 'Carol');
     assert.equal(result.source, 'new');
     assert.equal((await getRepo().findPlayerByNearAccount('bob.testnet')).sessionToken, owned.sessionToken);
+  });
+
+  it('a nonce is spent by a sign-in that commits, so it cannot be replayed', async () => {
+    const body = signedBody('erin.testnet');
+    await signInWithNear(body, fullAccess);
+    await assert.rejects(signInWithNear(body, fullAccess), { code: 'BAD_NONCE' });
+  });
+
+  it('asks before leaving a guest save behind, without rotating anything', async () => {
+    const owned = await signInWithNear(signedBody('frank.testnet'), fullAccess);
+    const guest = createPlayerRecord('Leftbehind');
+    await getRepo().insertPlayer(guest);
+    const released = [];
+    const options = { ...fullAccess, releaseSession: async (t) => { released.push(t); } };
+
+    const body = signedBody('frank.testnet', { sessionToken: guest.sessionToken });
+    await assert.rejects(signInWithNear(body, options), (error) => {
+      assert.equal(error.code, 'SWITCH_REQUIRED');
+      assert.deepEqual(error.details, { accountId: 'frank.testnet', displayName: owned.displayName });
+      return true;
+    });
+    // Nothing moved: the wallet's token still works, nobody was kicked, the guest is untouched.
+    assert.deepEqual(released, []);
+    assert.ok(await getRepo().findPlayerByToken(owned.sessionToken));
+    assert.equal((await getRepo().findPlayerByToken(guest.sessionToken)).nearAccountId, undefined);
+
+    // Confirming resends the same signature; the nonce was not spent by the refusal.
+    const confirmed = await signInWithNear({ ...body, allowSwitch: true }, options);
+    assert.equal(confirmed.source, 'existing');
+    assert.deepEqual(released, [owned.sessionToken]);
+    assert.ok(await getRepo().findPlayerByToken(guest.sessionToken), 'the guest save is left as it was');
   });
 });
