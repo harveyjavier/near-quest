@@ -390,6 +390,8 @@ export class Hud {
       gold: byId('hud-gold'),
       goldPill: byId('wallet-gold-pill'),
       usdg: byId('hud-usdg'),
+      near: byId('hud-near'),
+      nearAccount: byId('hud-near-account'),
       usdgPill: byId('wallet-usdg-pill'),
       btnDeposit: byId('btn-deposit'),
       pearls: byId('hud-pearls'),
@@ -913,6 +915,14 @@ export class Hud {
     dom.gold.textContent = formatNumber(me.gold);
     dom.pearls.textContent = formatNumber(me.pearls);
     dom.usdg.textContent = this.formatUsdg(me.usdg ?? 0);
+
+    const account = me.nearAccountId;
+    dom.near.hidden = !account;
+    if (account) {
+      // Implicit accounts are 64 hex chars; keep the chip readable.
+      dom.nearAccount.textContent = account.length > 24 ? `${account.slice(0, 8)}…${account.slice(-6)}` : account;
+      dom.nearAccount.title = `Signed in with NEAR as ${account}`;
+    }
 
     for (const chip of dom.stakes.children) {
       const stake = Number(chip.dataset.stake);
