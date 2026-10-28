@@ -232,9 +232,15 @@ gate.wallet.addEventListener('click', async () => {
 gate.forget.addEventListener('click', async () => {
   if (storedNearAccount()) {
     gate.forget.disabled = true;
-    const { signOutNear } = await import('./net/nearWallet.js');
-    await signOutNear(storedSessionToken());
-    gate.forget.disabled = false;
+    try {
+      const { signOutNear } = await import('./net/nearWallet.js');
+      await signOutNear(storedSessionToken());
+    } catch (error) {
+      // The server-side revoke is best effort; signing out locally still happens.
+      console.error('Server sign-out failed:', error);
+    } finally {
+      gate.forget.disabled = false;
+    }
   }
   forgetSession();
   prepareGate();
