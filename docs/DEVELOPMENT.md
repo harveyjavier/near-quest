@@ -177,7 +177,8 @@ sign-in, the account chip, the deposit panel when deposits are off, sign-out,
 and the expired-session message.
 
 It uses the system Chromium (`/usr/bin/chromium`, or set `CHROME_PATH`) and
-downloads no browser. Without one, the suite is skipped.
+downloads no browser. Without one the suite is skipped locally, and fails when
+`CI` is set, so a CI run can't pass by not running it.
 
 `server/test/fixtures/testnet-usdc-ft_transfer.json` is a real
 `EXPERIMENTAL_tx_status` response for a relayed USDC transfer on testnet,

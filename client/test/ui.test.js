@@ -59,8 +59,12 @@ async function openGame(signer = account) {
   return page;
 }
 
-describe('wallet UI', { skip: !existsSync(CHROME) && `no Chromium at ${CHROME}` }, () => {
+// Locally a missing browser skips the suite; in CI it fails, so it can't pass by not running.
+const noBrowser = !existsSync(CHROME) && `no Chromium at ${CHROME}; set CHROME_PATH to a Chromium or Chrome binary`;
+
+describe('wallet UI', { skip: !process.env.CI && noBrowser }, () => {
   before(async () => {
+    if (noBrowser) throw new Error(noBrowser);
     server = spawn('node', ['src/index.js'], {
       cwd: serverDir,
       // Every variable set, even to '', so nothing comes from server/.env (dotenv never overrides).
