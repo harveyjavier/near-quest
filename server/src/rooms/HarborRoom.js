@@ -169,8 +169,10 @@ export class HarborRoom extends Room {
       record = await repo.findPlayerByToken(requested.sessionToken);
     }
 
-    // A wallet device must never silently fall back to a fresh guest.
-    if (!record && requested.walletSession === true) {
+    // A wallet device must never silently fall back to a fresh guest, and a
+    // wallet save needs a fresh signature once its session runs out.
+    const walletExpired = record?.nearAccountId && !(record.sessionExpiresAt > Date.now());
+    if (walletExpired || (!record && requested.walletSession === true)) {
       throw new ServerError(SESSION_EXPIRED, 'Your wallet session has expired. Please sign in again.');
     }
 

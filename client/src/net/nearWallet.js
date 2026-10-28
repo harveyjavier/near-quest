@@ -115,3 +115,12 @@ export async function signInWithNear({ sessionToken, displayName }) {
     displayName,
   });
 }
+
+/** Revokes a wallet session on the server. Best effort: local sign-out happens regardless. */
+export async function signOutNear(sessionToken) {
+  await fetch(`${HTTP_URL}/auth/signout`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionToken }),
+  }).catch(() => {});
+}

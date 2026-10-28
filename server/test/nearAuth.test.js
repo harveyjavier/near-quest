@@ -8,7 +8,8 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { before, describe, it } from 'node:test';
 
 import {
-  SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, assertAuthRate, issueNonce, nep413Hash, signInWithNear, verifyNearSignIn,
+  SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, WALLET_SESSION_TTL_MS, assertAuthRate, issueNonce, nep413Hash, signInWithNear,
+  signOutNear, verifyNearSignIn,
 } from '../src/auth/near.js';
 import { connectDatabase, createPlayerRecord, getRepo } from '../src/db/repo.js';
 
@@ -96,7 +97,9 @@ describe('signInWithNear', () => {
     assert.notEqual(again.sessionToken, first.sessionToken);
     assert.equal(again.source, 'existing');
     assert.equal(await getRepo().findPlayerByToken(first.sessionToken), null);
-    assert.equal((await getRepo().findPlayerByToken(again.sessionToken)).nearAccountId, 'bob.testnet');
+    const current = await getRepo().findPlayerByToken(again.sessionToken);
+    assert.equal(current.nearAccountId, 'bob.testnet');
+    assert.ok(Math.abs(current.sessionExpiresAt - (Date.now() + WALLET_SESSION_TTL_MS)) < 5000);
   });
 
   it('never rebinds a save that already belongs to another wallet', async () => {
@@ -137,5 +140,19 @@ describe('signInWithNear', () => {
     assert.equal(confirmed.source, 'existing');
     assert.deepEqual(released, [owned.sessionToken]);
     assert.ok(await getRepo().findPlayerByToken(guest.sessionToken), 'the guest save is left as it was');
+  });
+
+  it('sign-out kills a wallet token but never a guest token', async () => {
+    const { sessionToken } = await signInWithNear(signedBody('dave.testnet'), fullAccess);
+    const released = [];
+    await signOutNear(sessionToken, { releaseSession: async (t) => { released.push(t); } });
+    assert.deepEqual(released, [sessionToken]);
+    assert.equal(await getRepo().findPlayerByToken(sessionToken), null);
+    assert.equal((await getRepo().findPlayerByNearAccount('dave.testnet')).sessionExpiresAt, 0);
+
+    const guest = createPlayerRecord('Stays');
+    await getRepo().insertPlayer(guest);
+    await signOutNear(guest.sessionToken);
+    assert.ok(await getRepo().findPlayerByToken(guest.sessionToken));
   });
 });

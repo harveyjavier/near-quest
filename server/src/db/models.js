@@ -106,6 +106,8 @@ export const PlayerSchema = new Schema(
     displayName: { type: String, required: true },
     // Set once by NEAR wallet sign-in; unique so one wallet owns one player.
     nearAccountId: { type: String, unique: true, sparse: true },
+    // Wallet players only. Not in PERSISTED_FIELDS, so room saves never touch it.
+    sessionExpiresAt: { type: Number },
 
     rodLevel: { type: Number, default: 1, min: 1 },
     xp: { type: Number, default: 0, min: 0 },
