@@ -16,7 +16,8 @@ import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 
 import { CLIENT_CATALOG, CONNECTION, ROOM_NAME } from './config/index.js';
-import { HarborRoom } from './rooms/HarborRoom.js';
+import { HarborRoom, releaseSession } from './rooms/HarborRoom.js';
+import { NEAR_NETWORK, SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, assertAuthRate, issueNonce, signInWithNear } from './auth/near.js';
 import { connectDatabase, disconnectDatabase, getRepo, repoKind } from './db/repo.js';
 import { log } from './util/logger.js';
 
@@ -46,6 +47,8 @@ async function main() {
 
   const app = express();
   app.disable('x-powered-by');
+  // Railway/Heroku put one proxy in front; without this every request.ip is the proxy's.
+  app.set('trust proxy', 1);
   app.use(cors(corsOptions()));
   app.use(express.json({ limit: '16kb' }));
 
@@ -71,8 +74,33 @@ async function main() {
   // Lets the client render the shop and fish list before it opens a socket.
   app.get('/catalog', (_request, response) => response.json(CLIENT_CATALOG));
 
+  // NEAR wallet sign-in: fetch a one-time challenge, sign it, post it back.
+  const AUTH_STATUS = { RATE_LIMITED: 429, BUSY: 503, NEAR_UNAVAILABLE: 503 };
+  const authError = (response, error) => {
+    if (error.code === 11000) return response.status(409).json({ error: 'That wallet was just linked elsewhere. Try again.' });
+    if (error.name !== 'ValidationError') throw error;
+    response.status(AUTH_STATUS[error.code] ?? 401).json({ code: error.code, error: error.message });
+  };
+  app.get('/auth/near/challenge', (request, response) => {
+    try {
+      assertAuthRate(request.ip);
+      response.json({ nonce: issueNonce(), message: SIGN_IN_MESSAGE, recipient: SIGN_IN_RECIPIENT, network: NEAR_NETWORK });
+    } catch (error) {
+      authError(response, error);
+    }
+  });
+
+  app.post('/auth/near', async (request, response) => {
+    try {
+      assertAuthRate(request.ip);
+      response.json(await signInWithNear(request.body ?? {}, { releaseSession }));
+    } catch (error) {
+      authError(response, error);
+    }
+  });
+
   app.get('/', (_request, response) =>
-    response.json({ name: 'Fishing Idle Game MMO', endpoints: ['/health', '/catalog'] }));
+    response.json({ name: 'Fishing Idle Game MMO', endpoints: ['/health', '/catalog', '/auth/near/challenge', '/auth/near'] }));
 
   // Express 5 error handler: never leak a stack trace to a browser.
   // eslint-disable-next-line no-unused-vars
