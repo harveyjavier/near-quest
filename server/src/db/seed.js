@@ -16,7 +16,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 
-import { ChatMessage, Player } from './models.js';
+import { ChatMessage, Deposit, Player } from './models.js';
 import { CHEST_TIERS, FISH, REWARD_TYPES, RODS, SHOP_ITEMS } from '../config/index.js';
 import { log } from '../util/logger.js';
 
@@ -49,6 +49,7 @@ async function main() {
   // and every join, rather than letting the first production query do it.
   await Player.syncIndexes();
   await ChatMessage.syncIndexes();
+  await Deposit.syncIndexes();
   log.info('Indexes synced.');
 
   const existingChat = await ChatMessage.estimatedDocumentCount();

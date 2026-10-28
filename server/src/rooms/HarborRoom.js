@@ -17,6 +17,7 @@ import {
   CLIENT_CATALOG,
   CONNECTION,
   CURRENCIES_BY_ID,
+  DEPOSITS,
   EMISSION_MONITOR,
   LEADERBOARD,
   MAX_CLIENTS_PER_ROOM,
@@ -28,7 +29,7 @@ import {
 } from '../config/index.js';
 import { openChest, appraiseGem, useConsumable } from '../game/chests.js';
 import {
-  applyBaitRegen, buyGoldWithUsdg, createBaitStock, depositUsdg, purchase, returnBaitToStock,
+  applyBaitRegen, buyGoldWithUsdg, createBaitStock, creditUsdg, depositUsdg, purchase, returnBaitToStock,
 } from '../game/economy.js';
 import {
   activeBuffs,
@@ -54,6 +55,7 @@ import { createPlayerRecord, getRepo, WORLD_KEY } from '../db/repo.js';
 import { HarborState, ChatEntry, LeaderEntry, PlayerState } from './schema/HarborState.js';
 import { catchLogView, meView } from './views.js';
 import { log } from '../util/logger.js';
+import { validateTxHash, verifyUsdcDeposit } from '../payments/usdc.js';
 import {
   ValidationError,
   asObject,
@@ -451,13 +453,13 @@ export class HarborRoom extends Room {
     });
 
     /**
-     * Credits USDG straight to the wallet.
-     *
-     * There is no payment backend behind this yet -- see `depositUsdg`'s own
-     * note in game/economy.js -- so this is the "simulated deposit" the wallet
-     * panel already described as coming, bounded by USDG_LIMITS.
+     * The fake deposit: credits USDG for nothing. Only when DEPOSITS.mode is
+     * 'fake' (ALLOW_FAKE_DEPOSITS=true and no treasury), i.e. local dev.
      */
     this.handle('deposit_usdg', (client, runtime, payload) => {
+      if (DEPOSITS.mode !== 'fake') {
+        throw new ValidationError('DEPOSITS_OFF', 'Use a NEAR wallet to deposit USDC.');
+      }
       const amount = validateUsdgAmount(payload.amount);
       const result = depositUsdg(runtime.record, amount);
 
@@ -468,6 +470,45 @@ export class HarborRoom extends Room {
 
       runtime.dirty = true;
       client.send('usdg_deposited', result);
+      this.sendMe(client, runtime);
+    });
+
+    /**
+     * Credits a USDC transfer the player already sent to the treasury. The
+     * amount comes from the chain, never the client. See payments/usdc.js.
+     */
+    this.handle('claim_deposit', async (client, runtime, payload) => {
+      if (DEPOSITS.mode !== 'chain') throw new ValidationError('DEPOSITS_OFF', 'Deposits are not open yet.');
+      const accountId = runtime.record.nearAccountId;
+      if (!accountId) throw new ValidationError('WALLET_REQUIRED', 'Sign in with a NEAR wallet to deposit.');
+      const txHash = validateTxHash(payload.txHash);
+
+      const { units, usdg } = await verifyUsdcDeposit({ txHash, accountId });
+      const repo = getRepo();
+      if (!await repo.insertDeposit({ txHash, accountId, units, usdg, status: 'pending', at: Date.now() })) {
+        client.send('deposit_claimed', { txHash, already: true });
+        return;
+      }
+      // The player may have left while RPC was answering. Free the claim so the
+      // client's saved hash credits it on the next join.
+      if (this.runtime.get(client.sessionId) !== runtime) {
+        await repo.deleteDeposit(txHash);
+        return;
+      }
+
+      creditUsdg(runtime.record, usdg);
+      runtime.dirty = true;
+      try {
+        await this.persist(runtime);
+        await repo.setDepositStatus(txHash, 'credited');
+      } catch (error) {
+        // Credited in memory; the next flush retries the save. Row stays 'pending'.
+        runtime.dirty = true;
+        log.error(`Deposit ${txHash} credited but not saved yet:`, error.message);
+      }
+      log.info(`Deposit ${txHash}: $${usdg} USDC from ${accountId}.`);
+      client.send('deposit_claimed', { txHash, already: false });
+      client.send('usdg_deposited', { ok: true, deposited: usdg, usdg: runtime.record.usdg });
       this.sendMe(client, runtime);
     });
 

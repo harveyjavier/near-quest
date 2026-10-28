@@ -17,8 +17,9 @@ import { log } from '../util/logger.js';
 import { token } from '../util/rng.js';
 import { ValidationError, coerceDisplayName, isValidSessionToken } from '../util/validate.js';
 
-export const NEAR_NETWORK = process.env.NEAR_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
-const NEAR_RPC_URL = process.env.NEAR_RPC_URL || `https://rpc.${NEAR_NETWORK}.near.org`;
+import { NEAR_NETWORK, NEAR_RPC_URL } from '../config/near.config.js';
+
+export { NEAR_NETWORK };
 
 /** Shown in the wallet's signing prompt; must match what the client signs. */
 export const SIGN_IN_MESSAGE = "Sign in to Robin's Club";
@@ -118,12 +119,12 @@ export function nep413Hash({ message, nonce, recipient, callbackUrl = null }) {
 }
 
 /** One JSON-RPC call. Resolves with `{ result, error }` as NEAR returns them. */
-export async function nearRpc(method, params) {
+export async function nearRpc(method, params, { timeoutMs = 8000 } = {}) {
   const response = await fetch(NEAR_RPC_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 'game', method, params }),
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   return response.json();
 }

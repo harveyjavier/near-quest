@@ -124,7 +124,7 @@ function projectForSave(record) {
 
 /* ------------------------------------------------------------------ Mongo -- */
 
-function mongoBackend({ Player, ChatMessage, World }) {
+function mongoBackend({ Player, ChatMessage, World, Deposit }) {
   return {
     kind: 'mongodb',
 
@@ -148,6 +148,25 @@ function mongoBackend({ Player, ChatMessage, World }) {
         { $set: { nearAccountId } },
       ).exec();
       return result.modifiedCount === 1;
+    },
+
+    /** False when the txHash was already claimed. */
+    async insertDeposit(row) {
+      try {
+        await Deposit.create(row);
+        return true;
+      } catch (error) {
+        if (error.code === 11000) return false;
+        throw error;
+      }
+    },
+
+    async setDepositStatus(txHash, status) {
+      await Deposit.updateOne({ txHash }, { $set: { status } }).exec();
+    },
+
+    async deleteDeposit(txHash) {
+      await Deposit.deleteOne({ txHash }).exec();
     },
 
     async rotateSessionToken(oldToken, newToken, sessionExpiresAt) {
@@ -230,6 +249,7 @@ function mongoBackend({ Player, ChatMessage, World }) {
 
 function memoryBackend() {
   const players = new Map();
+  const deposits = new Map();
   const chat = [];
   let world = null;
 
@@ -256,6 +276,21 @@ function memoryBackend() {
       if (!found || found.nearAccountId) return false;
       found.nearAccountId = nearAccountId;
       return true;
+    },
+
+    async insertDeposit(row) {
+      if (deposits.has(row.txHash)) return false;
+      deposits.set(row.txHash, { ...row });
+      return true;
+    },
+
+    async setDepositStatus(txHash, status) {
+      const row = deposits.get(txHash);
+      if (row) row.status = status;
+    },
+
+    async deleteDeposit(txHash) {
+      deposits.delete(txHash);
     },
 
     async rotateSessionToken(oldToken, newToken, sessionExpiresAt) {

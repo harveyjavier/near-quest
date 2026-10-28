@@ -160,6 +160,24 @@ export const ChatMessageSchema = new Schema(
   { versionKey: false },
 );
 
+/**
+ * One row per on-chain USDC deposit. The unique txHash is what stops a
+ * transaction being credited twice. `status` is 'pending' from the claim until
+ * the player save lands, then 'credited'; a row stuck on 'pending' needs a look.
+ */
+export const DepositSchema = new Schema(
+  {
+    txHash: { type: String, required: true, unique: true },
+    accountId: { type: String, required: true, index: true },
+    units: { type: String, required: true },
+    usdg: { type: Number, required: true },
+    status: { type: String, required: true },
+    at: { type: Number, default: () => Date.now() },
+  },
+  { versionKey: false },
+);
+
 export const Player = mongoose.model('Player', PlayerSchema);
+export const Deposit = mongoose.model('Deposit', DepositSchema);
 export const ChatMessage = mongoose.model('ChatMessage', ChatMessageSchema);
 export const World = mongoose.model('World', WorldSchema);
