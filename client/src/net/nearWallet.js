@@ -56,6 +56,30 @@ async function readJson(response) {
 }
 
 /**
+ * Posts a signed sign-in. When the wallet already owns a different save than
+ * this device's guest, the server refuses without changing anything; this
+ * resolves with `{ switchRequired, accountId, displayName, confirm }` and
+ * `confirm()` resends the same signature with permission to switch.
+ */
+async function submitSignIn(path, body) {
+  const response = await fetch(`${HTTP_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.clone().json().catch(() => ({}));
+  if (response.status === 409 && result.code === 'SWITCH_REQUIRED') {
+    return {
+      switchRequired: true,
+      accountId: result.accountId,
+      displayName: result.displayName,
+      confirm: () => submitSignIn(path, { ...body, allowSwitch: true }),
+    };
+  }
+  return readJson(response);
+}
+
+/**
  * Resolves with `{ sessionToken, displayName, accountId }`. The guest token, if
  * any, is sent so a first wallet sign-in keeps this device's progress.
  */
@@ -81,17 +105,13 @@ export async function signInWithNear({ sessionToken, displayName }) {
   }
   if (!signed?.signature) throw new Error('The wallet did not return a signature.');
 
-  return readJson(await fetch(`${HTTP_URL}/auth/near`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      accountId: signed.accountId,
-      publicKey: signed.publicKey,
-      signature: signed.signature,
-      nonce: challenge.nonce,
-      callbackUrl,
-      sessionToken,
-      displayName,
-    }),
-  }));
+  return submitSignIn('/auth/near', {
+    accountId: signed.accountId,
+    publicKey: signed.publicKey,
+    signature: signed.signature,
+    nonce: challenge.nonce,
+    callbackUrl,
+    sessionToken,
+    displayName,
+  });
 }

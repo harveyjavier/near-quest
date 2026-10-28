@@ -208,12 +208,15 @@ gate.wallet.addEventListener('click', async () => {
     const { signInWithNear } = await import('./net/nearWallet.js');
     const name = validateName(gate.input.value);
     const guestToken = storedSessionToken();
-    const session = await signInWithNear({ sessionToken: guestToken, displayName: name.ok ? name.name : undefined });
+    let session = await signInWithNear({ sessionToken: guestToken, displayName: name.ok ? name.name : undefined });
 
-    // The wallet already owns a different save: switching orphans this device's guest progress.
-    if (session.source === 'existing' && guestToken && !storedNearAccount() &&
-        !window.confirm(`${session.accountId} already has a save (${session.displayName}). Switch to it? This device's guest progress will be left behind.`)) {
-      return;
+    // The wallet already owns a different save. The server changed nothing yet,
+    // so saying no here leaves both the guest and the wallet's sessions intact.
+    if (session.switchRequired) {
+      if (!window.confirm(`${session.accountId} already has a save (${session.displayName}). Switch to it? This device's guest progress will be left behind.`)) {
+        return;
+      }
+      session = await session.confirm();
     }
     storeSession(session.sessionToken, session.displayName, session.accountId);
     await connectAndStart(session.displayName);
