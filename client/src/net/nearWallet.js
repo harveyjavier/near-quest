@@ -219,9 +219,5 @@ export async function signInWithMetaMask({ sessionToken, displayName }) {
   if (!challenge.ethMessage) throw new Error('The server did not send a sign-in message.');
   const signature = await ethereum.request({ method: 'personal_sign', params: [utf8ToHex(challenge.ethMessage), address] });
 
-  return readJson(await fetch(`${HTTP_URL}/auth/eth`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ address: accountId, nonce: challenge.nonce, signature, sessionToken, displayName }),
-  }));
+  return submitSignIn('/auth/eth', { address: accountId, nonce: challenge.nonce, signature, sessionToken, displayName });
 }

@@ -24,7 +24,7 @@ name is `harbor`. The client joins with `joinOrCreate`.
 | `GET` | `/catalog` | The full `CLIENT_CATALOG` payload (same object sent on join) |
 | `GET` | `/` | `{ name, endpoints }` |
 | `GET` | `/auth/near/challenge` | `{ nonce, message, recipient, network }`. The nonce works once and expires after 5 minutes. |
-| `POST` | `/auth/eth` | `{ address, signature, nonce, sessionToken?, displayName? }` → same as `/auth/near` |
+| `POST` | `/auth/eth` | `{ address, signature, nonce, sessionToken?, displayName?, allowSwitch? }` → same as `/auth/near` |
 | `POST` | `/auth/signout` | `{ sessionToken }` → 204 |
 | `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName?, allowSwitch? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 409 / 429 / 503 |
 

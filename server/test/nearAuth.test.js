@@ -86,12 +86,6 @@ describe('verifyEthSignIn', () => {
     await assert.rejects(verifyEthSignIn(await ethBody(ETH_ADDRESS, other)), { code: 'BAD_SIGNATURE' });
   });
 
-  it('rejects a replayed nonce', async () => {
-    const body = await ethBody();
-    await verifyEthSignIn(body);
-    await assert.rejects(verifyEthSignIn(body), { code: 'BAD_NONCE' });
-  });
-
   it('rejects mixed-case and banned addresses', async () => {
     await assert.rejects(verifyEthSignIn({ ...(await ethBody()), address: ethAccount.address }), { code: 'BAD_ACCOUNT' });
     const banned = '0x0048501436e6325eff9756d804160dce4aaf3f3f';
@@ -145,10 +139,37 @@ describe('signInWithNear', () => {
     assert.equal((await getRepo().findPlayerByNearAccount('bob.testnet')).sessionToken, owned.sessionToken);
   });
 
+  it('sign-out kills a wallet token but never a guest token', async () => {
+    const { sessionToken } = await signInWithNear(signedBody('dave.testnet'), fullAccess);
+    const released = [];
+    await signOutNear(sessionToken, { releaseSession: async (t) => { released.push(t); } });
+    assert.deepEqual(released, [sessionToken]);
+    assert.equal(await getRepo().findPlayerByToken(sessionToken), null);
+    assert.equal((await getRepo().findPlayerByNearAccount('dave.testnet')).sessionExpiresAt, 0);
+
+    const guest = createPlayerRecord('Stays');
+    await getRepo().insertPlayer(guest);
+    await signOutNear(guest.sessionToken);
+    assert.ok(await getRepo().findPlayerByToken(guest.sessionToken));
+  });
+
+  it('MetaMask sign-in binds the eth-implicit account like any wallet', async () => {
+    const guest = createPlayerRecord('Metamasker');
+    await getRepo().insertPlayer(guest);
+    const result = await signInWithEthereum({ ...(await ethBody()), sessionToken: guest.sessionToken });
+    assert.equal(result.source, 'guest');
+    assert.equal(result.accountId, ETH_ADDRESS);
+    assert.equal((await getRepo().findPlayerByToken(result.sessionToken)).nearAccountId, ETH_ADDRESS);
+  });
+
   it('a nonce is spent by a sign-in that commits, so it cannot be replayed', async () => {
-    const body = signedBody('erin.testnet');
-    await signInWithNear(body, fullAccess);
-    await assert.rejects(signInWithNear(body, fullAccess), { code: 'BAD_NONCE' });
+    const near = signedBody('erin.testnet');
+    await signInWithNear(near, fullAccess);
+    await assert.rejects(signInWithNear(near, fullAccess), { code: 'BAD_NONCE' });
+
+    const eth = await ethBody();
+    await signInWithEthereum(eth);
+    await assert.rejects(signInWithEthereum(eth), { code: 'BAD_NONCE' });
   });
 
   it('asks before leaving a guest save behind, without rotating anything', async () => {
@@ -174,28 +195,5 @@ describe('signInWithNear', () => {
     assert.equal(confirmed.source, 'existing');
     assert.deepEqual(released, [owned.sessionToken]);
     assert.ok(await getRepo().findPlayerByToken(guest.sessionToken), 'the guest save is left as it was');
-  });
-
-  it('sign-out kills a wallet token but never a guest token', async () => {
-    const { sessionToken } = await signInWithNear(signedBody('dave.testnet'), fullAccess);
-    const released = [];
-    await signOutNear(sessionToken, { releaseSession: async (t) => { released.push(t); } });
-    assert.deepEqual(released, [sessionToken]);
-    assert.equal(await getRepo().findPlayerByToken(sessionToken), null);
-    assert.equal((await getRepo().findPlayerByNearAccount('dave.testnet')).sessionExpiresAt, 0);
-
-    const guest = createPlayerRecord('Stays');
-    await getRepo().insertPlayer(guest);
-    await signOutNear(guest.sessionToken);
-    assert.ok(await getRepo().findPlayerByToken(guest.sessionToken));
-  });
-
-  it('MetaMask sign-in binds the eth-implicit account like any wallet', async () => {
-    const guest = createPlayerRecord('Metamasker');
-    await getRepo().insertPlayer(guest);
-    const result = await signInWithEthereum({ ...(await ethBody()), sessionToken: guest.sessionToken });
-    assert.equal(result.source, 'guest');
-    assert.equal(result.accountId, ETH_ADDRESS);
-    assert.equal((await getRepo().findPlayerByToken(result.sessionToken)).nearAccountId, ETH_ADDRESS);
   });
 });

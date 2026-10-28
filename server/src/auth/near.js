@@ -216,7 +216,7 @@ export async function verifyEthSignIn(body, { now = Date.now() } = {}) {
   if (typeof signature !== 'string' || !ETH_SIGNATURE.test(signature) || typeof nonce !== 'string') {
     throw new ValidationError('BAD_SIGNATURE', 'Missing signature.');
   }
-  if (!consumeNonce(nonce, now)) {
+  if (!nonceIsLive(nonce, now)) {
     throw new ValidationError('BAD_NONCE', 'Sign-in expired. Please try again.');
   }
   // Addresses NEAR blocked from eth-implicit accounts (keys known to others).

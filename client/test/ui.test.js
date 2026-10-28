@@ -42,10 +42,10 @@ async function waitFor(url) {
   throw new Error(`${url} never came up`);
 }
 
-/** A page with a fake MetaMask whose signatures come from `account`. */
-async function openGame() {
+/** A page with a fake MetaMask whose signatures come from `signer`. */
+async function openGame(signer = account) {
   const page = await browser.newPage();
-  await page.exposeFunction('__signMessage', (hex) => account.signMessage({ message: { raw: hex } }));
+  await page.exposeFunction('__signMessage', (hex) => signer.signMessage({ message: { raw: hex } }));
   await page.addInitScript((addr) => {
     window.ethereum = {
       request: async ({ method, params }) => {
@@ -54,7 +54,7 @@ async function openGame() {
         throw new Error(`unexpected ${method}`);
       },
     };
-  }, account.address);
+  }, signer.address);
   await page.goto(`http://127.0.0.1:${CLIENT_PORT}/`);
   return page;
 }
@@ -140,5 +140,45 @@ describe('wallet UI', { skip: !existsSync(CHROME) && `no Chromium at ${CHROME}` 
     await page.locator('#gate-error').filter({ hasText: 'Your NEAR session has ended' }).waitFor({ timeout: 10_000 });
     assert.equal(await page.evaluate(() => localStorage.getItem('fishing-idle.sessionToken')), null);
     await page.close();
+  });
+
+  it('asks before leaving a guest save behind, and saying no changes nothing', async () => {
+    // Its own wallet, so earlier tests' saves don't leak in.
+    const owner = privateKeyToAccount(generatePrivateKey());
+    const ownerAddress = owner.address.toLowerCase();
+
+    // The wallet's own save, made on one device.
+    const walletDevice = await openGame(owner);
+    await walletDevice.fill('#gate-name', 'Owner');
+    await walletDevice.click('#gate-metamask');
+    await walletDevice.locator('#hud').waitFor({ state: 'visible', timeout: 20_000 });
+    await walletDevice.reload();
+
+    // A guest on another device, then MetaMask with the same wallet.
+    const guestDevice = await openGame(owner);
+    await guestDevice.fill('#gate-name', 'Guesty');
+    await guestDevice.click('#gate-start');
+    await guestDevice.locator('#hud').waitFor({ state: 'visible', timeout: 20_000 });
+    await guestDevice.reload();
+    const guestToken = await guestDevice.evaluate(() => localStorage.getItem('fishing-idle.sessionToken'));
+
+    let prompt = '';
+    guestDevice.once('dialog', (dialog) => { prompt = dialog.message(); dialog.dismiss(); });
+    await guestDevice.click('#gate-metamask');
+    await guestDevice.waitForFunction(() => !document.querySelector('#gate-metamask').disabled);
+    assert.match(prompt, new RegExp(`^${ownerAddress} already has a save \\(Owner\\)`));
+    assert.equal(await guestDevice.evaluate(() => localStorage.getItem('fishing-idle.sessionToken')), guestToken);
+
+    // Saying no did not sign the wallet out elsewhere.
+    await walletDevice.click('#gate-start');
+    await walletDevice.locator('#hud').waitFor({ state: 'visible', timeout: 20_000 });
+
+    // Saying yes switches this device to the wallet's save.
+    guestDevice.once('dialog', (dialog) => dialog.accept());
+    await guestDevice.click('#gate-metamask');
+    await guestDevice.locator('#hud').waitFor({ state: 'visible', timeout: 20_000 });
+    assert.equal(await guestDevice.evaluate(() => localStorage.getItem('fishing-idle.nearAccountId')), ownerAddress);
+    await walletDevice.close();
+    await guestDevice.close();
   });
 });
