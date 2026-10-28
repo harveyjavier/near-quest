@@ -25,6 +25,8 @@ import { FISH, speciesForLevel } from '../config/fish.config.js';
 import {
   APPRAISAL_GRADES,
   APPRAISAL_TRAITS,
+  ASSAY_FEE_RATE,
+  CHEST_KEY_COST,
   CHEST_TIERS,
   CHEST_TIER_WEIGHTS,
   GEM_TIERS,
@@ -81,9 +83,13 @@ export function gemMeanGold(tier) {
   }, 0);
 }
 
-/** gemTierId -> mean Gold an appraisal of it pays. */
+/**
+ * gemTierId -> mean Gold an appraisal of it pays, after the assay fee. Net,
+ * because the monitor counts the Gold the player actually receives. The fee
+ * rounds per appraisal; ignoring that is under 0.5 Gold per gem.
+ */
 export const GEM_MEAN_GOLD = Object.freeze(
-  Object.fromEntries(GEM_TIERS.map((tier) => [tier.id, gemMeanGold(tier)])),
+  Object.fromEntries(GEM_TIERS.map((tier) => [tier.id, gemMeanGold(tier) * (1 - ASSAY_FEE_RATE)])),
 );
 
 /**
@@ -179,14 +185,18 @@ export function castExpectation({ rodLevel, stake }) {
 
   const chest = plan.catchRate * plan.chestChance;
   const ev = { gold: 0, xp: plan.catchRate * fishXp, bait: 0, pearls: 0 };
+  // Gold spent on chest keys. A sink, so kept apart from `ev`, which is mint.
+  let keyGold = 0;
   for (const [id, probability] of Object.entries(tiers)) {
     for (const key of Object.keys(ev)) ev[key] += chest * probability * CHEST_EV[id][key];
+    keyGold += chest * probability * (CHEST_KEY_COST[id] ?? 0);
   }
 
   return {
     hit: plan.catchRate,
     chest,
     ev,
+    keyGold,
     species,
     tiers,
     seconds: castSeconds(rodLevel),

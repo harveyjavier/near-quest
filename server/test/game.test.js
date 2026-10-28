@@ -45,6 +45,8 @@ import { GEM_MEAN_GOLD } from '../src/game/balanceModel.js';
 import {
   APPRAISAL_GRADES,
   APPRAISAL_TRAITS,
+  ASSAY_FEE_RATE,
+  CHEST_KEY_COST,
   CHEST_TIERS,
   CHEST_TIER_WEIGHTS,
   REWARD_TYPES,
@@ -68,7 +70,8 @@ import { weightedPick, chance, randomIntInclusive } from '../src/util/rng.js';
 function player(overrides = {}) {
   // Rod 10 by default: most tests are about odds, and species are gated behind
   // rod levels, so a level-1 record would only ever hook the starting fish.
-  return { ...createPlayerRecord('Tester'), bait: 1_000_000, rodLevel: 10, ...overrides };
+  // Gold too, so Epic and Legendary chests can pay for their keys.
+  return { ...createPlayerRecord('Tester'), bait: 1_000_000, gold: 1_000_000, rodLevel: 10, ...overrides };
 }
 
 /** A brand-new player, for the tests that are about levelling itself. */
@@ -1009,7 +1012,9 @@ describe('gem appraisal', () => {
     let best = { score: -Infinity, gold: 0 };
 
     for (let i = 0; i < 2000; i += 1) {
-      const { score, gold } = appraise(record, tier.id);
+      // The slice is the gross price; the assay fee comes off after.
+      const { score, gross: gold, fee, gold: net } = appraise(record, tier.id);
+      assert.equal(net, gold - fee);
       const slice = sliceFor(score);
       assert.ok(gold >= slice.lo && gold <= slice.hi,
         `graded ${score} paid ${gold}, outside its slice `
@@ -1412,3 +1417,43 @@ describe('progression pacing', () => {
     assert.ok(hours > 15, `~${hours.toFixed(1)}h of idling to max is too fast for the intended floor`);
   });
 });
+
+describe('gold sinks', () => {
+  const chestIn = (record, tier) => {
+    const chest = { id: `${tier}chest00000000`.slice(0, 16), tier, at: 0 };
+    record.chests.push(chest);
+    return chest.id;
+  };
+
+  it('epic and legendary chests charge their key, others open free', () => {
+    assert.deepEqual(CHEST_KEY_COST, { epic: 6, legendary: 20 });
+    for (const tier of ['common', 'rare', 'epic', 'legendary']) {
+      const record = player({ gold: 100 });
+      const opened = openChest(record, chestIn(record, tier));
+      const cost = CHEST_KEY_COST[tier] ?? 0;
+      assert.equal(opened.ok, true, tier);
+      assert.equal(opened.keyCost, cost);
+      assert.equal(record.gold, 100 - cost, `${tier} charged its key once`);
+    }
+  });
+
+  it('a player who cannot pay the key keeps the chest', () => {
+    const record = player({ gold: 19 });
+    const id = chestIn(record, 'legendary');
+    assert.deepEqual(openChest(record, id), { ok: false, code: 'KEY_UNAFFORDABLE', cost: 20 });
+    assert.equal(record.gold, 19);
+    assert.equal(record.chests.length, 1);
+  });
+
+  it('the assayer keeps 15% of every appraisal, rounded to the coin', () => {
+    assert.equal(ASSAY_FEE_RATE, 0.15);
+    for (let i = 0; i < 200; i += 1) {
+      const record = player({ gold: 0, uncutGems: [{ id: 'c'.repeat(16), tier: 'ruby', at: 0 }] });
+      const result = appraiseGem(record, 'c'.repeat(16));
+      assert.equal(result.fee, Math.round(result.gross * 0.15));
+      assert.equal(record.gold, result.gross - result.fee);
+      assert.equal(result.gold, record.gold);
+    }
+  });
+});
+
