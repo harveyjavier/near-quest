@@ -19,7 +19,7 @@ let selectorPromise = null;
 
 async function getSelector(network) {
   selectorPromise ??= (async () => {
-    const [{ setupWalletSelector }, { setupModal }, { setupMeteorWallet }, { setupHereWallet }, { setupMyNearWallet }] = await Promise.all([
+    const [{ setupWalletSelector, actionCreators }, { setupModal }, { setupMeteorWallet }, { setupHereWallet }, { setupMyNearWallet }] = await Promise.all([
       import('@near-wallet-selector/core'),
       import('@near-wallet-selector/modal-ui'),
       import('@near-wallet-selector/meteor-wallet'),
@@ -31,7 +31,7 @@ async function getSelector(network) {
       network,
       modules: [setupMeteorWallet(), setupHereWallet(), setupMyNearWallet()],
     });
-    return { selector, modal: setupModal(selector, {}) };
+    return { selector, modal: setupModal(selector, {}), actionCreators };
   })();
   return selectorPromise;
 }
@@ -123,4 +123,40 @@ export async function signOutNear(sessionToken) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ sessionToken }),
   }).catch(() => {});
+}
+
+/**
+ * Sends `usdg` dollars of USDC from the player's wallet to the treasury and
+ * resolves with the transaction hash. The server credits it from the chain.
+ * The connected wallet must be the account this save is bound to.
+ */
+export async function sendUsdcDeposit({ deposits, accountId, usdg }) {
+  const wallets = await getSelector(deposits.network);
+  await connectWallet(wallets);
+  let wallet = await wallets.selector.wallet();
+
+  const [connected] = await wallet.getAccounts();
+  if (connected?.accountId !== accountId) {
+    await wallet.signOut().catch(() => {});
+    await connectWallet(wallets);
+    wallet = await wallets.selector.wallet();
+    const [retry] = await wallet.getAccounts();
+    if (retry?.accountId !== accountId) throw new Error(`Connect ${accountId} to deposit into this save.`);
+  }
+
+  // Whole cents in, token units out: 1 cent = 10^(decimals - 2) units.
+  const units = BigInt(Math.round(usdg * 100)) * 10n ** BigInt(deposits.usdcDecimals - 2);
+  const outcome = await wallet.signAndSendTransaction({
+    signerId: accountId,
+    receiverId: deposits.usdcContract,
+    actions: [wallets.actionCreators.functionCall(
+      'ft_transfer',
+      { receiver_id: deposits.treasury, amount: units.toString(), memo: 'deposit' },
+      30_000_000_000_000n,
+      1n, // ft_transfer requires exactly 1 yoctoNEAR
+    )],
+  });
+  const hash = outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id;
+  if (!hash) throw new Error('The wallet did not return a transaction.');
+  return hash;
 }

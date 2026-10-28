@@ -641,6 +641,10 @@ export class Hud {
       this.refreshShop();
     });
 
+    net.on('depositClaimed', ({ already }) => {
+      if (already) this.toast('That deposit was already credited.', 'warn');
+    });
+
     net.on('usdgDeposited', (result) => {
       this.toast(`Deposited ${this.formatUsdg(result.deposited)}`, 'good');
       if (this.wallet?.nodes.depositAmount) this.wallet.nodes.depositAmount.value = '';
@@ -4322,7 +4326,7 @@ export class Hud {
 
     const name = document.createElement('span');
     name.className = 'wal-account__name';
-    name.textContent = 'No wallet connected';
+    name.textContent = this.me?.nearAccountId ?? 'No wallet connected';
 
     const chevron = document.createElement('span');
     chevron.className = 'wal-account__chevron';
@@ -4402,11 +4406,10 @@ export class Hud {
    *
    * It expands in place rather than opening a sheet, because an amount is
    * something a player types while looking at the rest of their wallet -- the
-   * reference does the same for its address field. Currency and Network stay
-   * as a fixed USDG-over-a-chain picture for now (there is only one coin and
-   * no chain actually moves anything), and the amount typed here is credited
-   * straight to the wallet -- see `depositUsdg` in server/src/game/economy.js
-   * for why that is a stand-in for a payment gateway rather than one itself.
+   * reference does the same for its address field. What the button does
+   * depends on `catalog.deposits.mode`: 'chain' sends USDC on NEAR and the
+   * server credits it from the chain, 'fake' (dev only) credits it directly,
+   * 'off' disables it.
    */
   walletTransfer() {
     const box = document.createElement('div');
@@ -4427,9 +4430,11 @@ export class Hud {
 
     const grid = document.createElement('div');
     grid.className = 'wal-transfer__grid';
+    const deposits = this.catalog?.deposits ?? { mode: 'off' };
+    const onChain = deposits.mode === 'chain';
     grid.append(
-      this.walletField('Currency', this.walletSelect(['USDG'])),
-      this.walletField('Network', this.walletSelect(WALLET_NETWORKS)),
+      this.walletField('Currency', this.walletSelect([onChain ? 'USDC' : 'USDG'])),
+      this.walletField('Network', this.walletSelect(onChain ? ['NEAR'] : WALLET_NETWORKS)),
     );
 
     const amountLabel = document.createElement('div');
@@ -4453,18 +4458,48 @@ export class Hud {
         this.toast('Enter an amount to deposit.', 'warn');
         return;
       }
-      this.net.depositUsdg(Math.round(value * 100) / 100);
+      const usdg = Math.round(value * 100) / 100;
+      if (deposits.mode === 'fake') {
+        this.net.depositUsdg(usdg);
+      } else if (onChain) {
+        this.sendChainDeposit(deposits, usdg, confirm);
+      }
     });
+    confirm.disabled = deposits.mode === 'off';
 
     const hint = document.createElement('p');
     hint.className = 'wal-transfer__hint';
-    hint.textContent = 'Credited straight to your wallet -- there is no real payment '
-      + 'gateway behind this yet, so nothing is actually charged.';
+    hint.textContent = {
+      chain: 'Sends USDC from your NEAR wallet. 1 USDC = $1.00 USDG, credited once the transfer is final.',
+      fake: 'Dev mode: credited straight to your wallet. Nothing is charged.',
+      off: 'Deposits are not open yet.',
+    }[deposits.mode];
 
     box.append(head, grid, amountLabel, amount, confirm, hint);
     this.wallet.nodes.transfer = box;
     this.wallet.nodes.depositAmount = amount;
     return box;
+  }
+
+  /** Opens the wallet to send USDC, then hands the transaction hash to the server. */
+  async sendChainDeposit(deposits, usdg, button) {
+    const accountId = this.me?.nearAccountId;
+    if (!accountId) {
+      this.toast('Sign in with a NEAR wallet to deposit.', 'warn');
+      return;
+    }
+    button.disabled = true;
+    try {
+      const { sendUsdcDeposit } = await import('../net/nearWallet.js');
+      const txHash = await sendUsdcDeposit({ deposits, accountId, usdg });
+      this.net.claimDeposit(txHash);
+      this.toast('Transfer sent. Confirming on NEAR...', 'good');
+    } catch (error) {
+      console.error('USDC deposit failed:', error);
+      this.toast(error?.message || 'The deposit did not go through.', 'warn');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   /** Shows or hides the transfer section, and tells the button which it is. */

@@ -17,7 +17,24 @@ const STORAGE_KEYS = {
   sessionToken: 'fishing-idle.sessionToken',
   displayName: 'fishing-idle.displayName',
   nearAccountId: 'fishing-idle.nearAccountId',
+  pendingDeposits: 'fishing-idle.pendingDeposits',
 };
+
+/** A sent transfer the server hasn't confirmed is retried on each join for this long. */
+const PENDING_DEPOSIT_TTL_MS = 7 * 24 * 60 * 60_000;
+
+/** txHash -> { sentAt, accountId }, for transfers already on-chain but not yet credited. */
+function readPendingDeposits() {
+  try {
+    return JSON.parse(readStorage(STORAGE_KEYS.pendingDeposits) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writePendingDeposits(pending) {
+  writeStorage(STORAGE_KEYS.pendingDeposits, JSON.stringify(pending));
+}
 
 /** How often the client asks the room to prove it is still there. */
 const HEARTBEAT_MS = 10_000;
@@ -174,6 +191,7 @@ export class NetClient {
     });
 
     room.onMessage('me', (me) => {
+      if (!this.me && me.nearAccountId) this.retryPendingDeposits(me.nearAccountId);
       this.me = me;
       this.emit('me', me);
     });
@@ -192,6 +210,12 @@ export class NetClient {
     room.onMessage('rod_upgraded', (payload) => this.emit('rodUpgraded', payload));
     room.onMessage('purchased', (payload) => this.emit('purchased', payload));
     room.onMessage('usdg_deposited', (payload) => this.emit('usdgDeposited', payload));
+    room.onMessage('deposit_claimed', ({ txHash, already }) => {
+      const pending = readPendingDeposits();
+      delete pending[txHash];
+      writePendingDeposits(pending);
+      this.emit('depositClaimed', { txHash, already });
+    });
     room.onMessage('gold_bought', (payload) => this.emit('goldBought', payload));
     room.onMessage('consumable_used', (payload) => this.emit('consumableUsed', payload));
     room.onMessage('catch_log', (payload) => this.emit('catchLog', payload));
@@ -359,6 +383,26 @@ export class NetClient {
   buy(itemId, quantity = 1) { this.send('buy', { itemId, quantity }); }
   /** Credits USDG to the wallet. See `depositUsdg` in server/src/game/economy.js. */
   depositUsdg(amount) { this.send('deposit_usdg', { amount }); }
+
+  /**
+   * Asks the server to credit an on-chain USDC transfer. The hash is kept
+   * until the server confirms, so a dropped tab or RPC hiccup is retried.
+   */
+  claimDeposit(txHash) {
+    const accountId = this.me?.nearAccountId;
+    writePendingDeposits({ ...readPendingDeposits(), [txHash]: { sentAt: Date.now(), accountId } });
+    this.send('claim_deposit', { txHash });
+  }
+
+  retryPendingDeposits(accountId) {
+    const now = Date.now();
+    const pending = readPendingDeposits();
+    for (const [txHash, entry] of Object.entries(pending)) {
+      if (!(now - entry?.sentAt <= PENDING_DEPOSIT_TTL_MS)) delete pending[txHash];
+      else if (entry.accountId === accountId) this.send('claim_deposit', { txHash });
+    }
+    writePendingDeposits(pending);
+  }
   /** Converts USDG into Gold at the locked GOLD_DOLLAR_RATE anchor. */
   buyGold(gold) { this.send('buy_gold', { gold }); }
   chat(text) { this.send('chat', { text }); }
