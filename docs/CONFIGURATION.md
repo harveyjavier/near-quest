@@ -156,7 +156,7 @@ Everything in `server/src/config/` is live game balance. The loop:
 
 1. **Edit the config module.** Never scatter a constant into a game module —
    `server/src/game/*` reads from config and should keep doing so.
-2. **Run the tests.** `npm test` — 107 server tests cover odds, economy,
+2. **Run the tests.** `npm test` — the server tests cover odds, economy,
    progression and the emission model, and several assert on config invariants.
 3. **Regenerate the balance report.** `npm run balance` prints the current
    tables; `node server/tools/gdd-balance.js --write` rewrites

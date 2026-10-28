@@ -25,6 +25,7 @@ Four signals. Everything else is noise until one of these moves.
 | Database backend | `GET /health` → `database` | `"mongodb"` | It reads `"memory"`. **Urgent** — every session is being discarded. |
 | Emission ratio | Server log, every 5 min | No warning | A warning appears. See below. |
 | Restart frequency | Railway deployments/log | Rare | Unexplained restarts, especially near a memory ceiling. |
+| Stuck deposits | `deposits` rows with `status: "pending"` | None older than a minute | Any. See [Deposits](#deposits). |
 
 Set an uptime check against `/health` from outside the platform. Railway's own
 health check restarts the process but does not tell you it happened.
@@ -60,6 +61,8 @@ Logs never contain connection strings or player data.
 - Check the Atlas storage graph. `chatmessages` grows unbounded (see below).
 - Confirm the backup schedule ran and a snapshot exists. A backup nobody has
   ever restored is a hypothesis, not a backup.
+- If deposits are on: look for `pending` deposit rows, and compare the week's
+  credited total with the treasury's USDC received on a NEAR explorer.
 
 **Monthly**
 
@@ -211,9 +214,66 @@ partial-recovery path, so the snapshot's age is exactly the data loss.
 
 ---
 
+## Deposits
+
+### Turning them on
+
+1. Create the treasury account on the network you run (`NEAR_NETWORK`). Keep
+   its keys offline; the server never needs them, it only reads the chain.
+2. Register it for storage on the USDC contract, or transfers to it fail:
+   call `storage_deposit` on the contract with `account_id` set to the
+   treasury and about 0.00125 NEAR attached.
+3. Check `NEAR_USDC_CONTRACT`'s default in `server/src/config/near.config.js`
+   against Circle's published USDC address for that network.
+4. Set `NEAR_TREASURY_ACCOUNT` and redeploy. `/catalog` should show
+   `deposits.mode: "chain"`. Make sure `ALLOW_FAKE_DEPOSITS` is not set.
+5. Send a small deposit yourself from a NEAR wallet and from MetaMask, and see
+   the USDG land and a `credited` row appear.
+
+### A row stuck on `pending`
+
+The server claimed the transaction hash and then stopped before the player
+save landed. Look the hash up on an explorer and compare with the player:
+
+```js
+db.deposits.find({ status: "pending" })
+db.players.findOne({ nearAccountId: "<accountId>" }, { usdg: 1 })
+```
+
+If the USDG is missing, add `usdg` to the player by hand and set the row to
+`credited`. Never delete a `credited` row: the collection is the only record
+of what was paid in.
+
+### "My deposit didn't arrive"
+
+Ask for the transaction hash. Unconfirmed hashes are kept in the player's
+browser and resent on every join for 7 days, so a slow RPC or a closed tab
+usually fixes itself on the next visit.
+
+- No row for the hash: the server rejected it. Check on an explorer that it
+  was USDC (`NEAR_USDC_CONTRACT`), sent from the player's bound account, to the
+  treasury, and that it succeeded. Anything else was not a deposit to us.
+- Sent to the wrong account, or a different token: it never reached the
+  treasury. There is nothing to credit or refund from our side.
+- Row is `credited`: it arrived. Check the player's USDG history.
+
+### NEAR RPC is down
+
+Sign-in with a NEAR wallet and deposit checks fail with `NEAR_UNAVAILABLE`.
+MetaMask sign-in still works (it needs no RPC), guests are unaffected, and
+pending deposits retry on the next join. If the public RPC is unreliable, point
+`NEAR_RPC_URL` at a paid provider.
+
+---
+
 ## Handling a player request
 
-**"I lost my progress."** Their browser lost the session token — cleared site
+**"I signed in with my wallet and lost my progress."** They will be back as
+soon as they sign in with the same wallet; the save follows the account, not
+the browser. "Your NEAR session has ended" means they signed in somewhere else
+or 30 days passed. Signing in again fixes it.
+
+**"I lost my progress."** For a guest: their browser lost the session token — cleared site
 data, a different browser or device, or private browsing. There is nothing to
 look them up by: no email, no password, no device id. The only field that could
 identify them is their display name, which is not unique and not proof of
@@ -225,9 +285,12 @@ needs accounts, and that is a feature, not a support process.
 
 ```js
 db.players.deleteOne({ sessionToken: "<their token>" })
+// or, for a wallet player:
+db.players.deleteOne({ nearAccountId: "<account id>" })
 ```
 
 They can read the token from `localStorage` under `fishing-idle.sessionToken`.
+Keep their `deposits` rows: they are payment records, not profile data.
 Their chat lines carry a display name and stay unless you remove them by name.
 No other collection holds anything about them.
 
@@ -280,7 +343,9 @@ each one will eventually generate a question:
   platform hard-stop). Normal restarts drain and lose nothing.
 - **In-flight casts are lost on restart.** Bait spent, cast gone — deliberately,
   so a restart cannot duplicate rewards.
-- **No account recovery.** Clearing site data ends a session permanently.
+- **No account recovery for guests.** Clearing site data ends a guest session
+  permanently. Wallet players sign in again.
+- **Deposits only go in.** There is no withdrawal, refund or cash-out path.
 - **No moderation tooling.** Chat is rate-limited and length-capped, not
   filtered.
 - **`chatmessages` is never pruned.** Needs an external job.

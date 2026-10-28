@@ -12,6 +12,7 @@ are things that will generate a question sooner or later.
 - [Decisions for the recipient](#decisions-for-the-recipient)
 - [What was removed, and why](#what-was-removed-and-why)
 - [Before zipping this folder](#before-zipping-this-folder)
+- [Added after handoff](#added-after-handoff)
 
 ---
 
@@ -281,3 +282,53 @@ them; they are yours.
 **Delivering via Git avoids the whole problem.** If a folder must be sent,
 delete the `.env` files and both `node_modules` directories first, and rotate the
 database password afterwards on the assumption the string was exposed.
+
+---
+
+## Added after handoff
+
+Wallet sign-in, USDC deposits and the first two Gold sinks were built after the
+delivery above. Details: [ARCHITECTURE.md](ARCHITECTURE.md#identity-guests-and-wallets),
+[PROTOCOL.md](PROTOCOL.md#http-endpoints), [OPERATIONS.md](OPERATIONS.md#deposits).
+
+**What changed**
+
+- Sign-in with a NEAR wallet (Meteor, HERE, MyNearWallet) or MetaMask. One
+  player per wallet; a device's guest save is kept on first sign-in. Session
+  tokens rotate on every sign-in, expire after 30 days, and can be revoked.
+- USDC deposits on NEAR into the USDG balance, verified on-chain. Off until
+  `NEAR_TREASURY_ACCOUNT` is set. The old free "deposit" now only works with
+  `ALLOW_FAKE_DEPOSITS=true`, for local development.
+- Chest keys (Epic 6 Gold, Legendary 20) and a 15% assay fee on appraisals.
+- A browser test, `npm --prefix client run test:ui`.
+- `node_modules` is no longer tracked in git.
+
+**Open before deposits go live**
+
+1. **Contract and legal.** The original contract excluded a real-money path,
+   and a stake with real-value inputs can count as gambling in some places.
+   Settle both before setting a treasury in production. This is not a
+   developer's call.
+2. **Real-wallet test.** Every flow is tested with stand-ins, never a live
+   wallet. Do one testnet sign-in and one small deposit with each of MetaMask,
+   Meteor, HERE and MyNearWallet.
+3. **USDC contract ids** in `server/src/config/near.config.js` were written
+   from memory. Check them against Circle's published addresses.
+4. **Treasury setup**: create it, register it for storage on the USDC contract,
+   keep its keys offline. Steps in [OPERATIONS.md](OPERATIONS.md#turning-them-on).
+
+**Open balance decision**
+
+Stakes 5 and 10 lose Gold at every rod level once bait is bought, and did
+before the new sinks; the sinks deepen that by 8-26%. Section 3.2 of
+`design/web3-sustainability-rebalance-plan.md` proposes gem, chest XP and bait
+changes to fix it, but its numbers were written against an older config.
+Choosing new numbers is the next step.
+
+**Known gaps**
+
+- No withdrawals or refunds; deposits only go in.
+- `client/` carries 21 low and moderate npm advisories inside the wallet
+  vendors' SDKs (`decode-uri-component`, `elliptic`) with no non-breaking fix.
+  High-severity ones are patched with `overrides` in `client/package.json`.
+- `test:ui` needs a local Chromium and is not part of CI.

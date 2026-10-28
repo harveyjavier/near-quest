@@ -31,6 +31,10 @@ order and the gates.
       proxy in front). Without `TRUST_PROXY` every player shares the proxy's
       IP for the sign-in rate limit; with it set off-platform, clients can
       spoof their IP.
+- [ ] NEAR variables: `NEAR_NETWORK=mainnet` for the public game, and
+      `ALLOW_FAKE_DEPOSITS` **unset**. If deposits are going live, also
+      `NEAR_TREASURY_ACCOUNT` and the steps in
+      [OPERATIONS.md](OPERATIONS.md#turning-them-on).
 - [ ] `numReplicas` is still `1` in `server/railway.json`.
 - [ ] A verified database backup exists, dated today. Verified means restored
       into a scratch database, not merely listed in a console.
@@ -38,7 +42,8 @@ order and the gates.
 - [ ] `curl https://YOUR-APP/health` → `"status": "ok"` **and**
       `"database": "mongodb"`. Not "memory". This is the single most important
       line in this checklist.
-- [ ] `curl https://YOUR-APP/catalog` shows the config you meant to ship.
+- [ ] `curl https://YOUR-APP/catalog` shows the config you meant to ship,
+      including `deposits.mode`: `"chain"` or `"off"`, never `"fake"`.
 
 ## Frontend
 
@@ -71,6 +76,13 @@ order and the gates.
       on a small screen after any UI change.
 - [ ] Two browsers at once: confirm both appear in the player list, chat
       crosses between them, and the leaderboard populates within ~10 seconds.
+- [ ] `npm --prefix client run test:ui` passes locally (wallet sign-in, deposit
+      panel, chest keys, assay fee).
+- [ ] On the live URL, sign in with a NEAR wallet and with MetaMask, reload,
+      and confirm the account chip shows and progress survived. Sign out and
+      confirm the old session is refused.
+- [ ] If deposits are on: send a small USDC deposit from each wallet type and
+      confirm it is credited once.
 
 ## After deploy
 
@@ -95,5 +107,9 @@ order and the gates.
 - `CORS_ORIGIN` is unset or `*` in production.
 - There is no backup from today.
 - `npm test` does not pass.
+- `/catalog` shows `deposits.mode: "fake"`: anyone can mint USDG.
+- Deposits are on but the treasury isn't registered on the USDC contract, or
+  the client contract and legal review for real-money deposits aren't done
+  (see [HANDOFF.md](HANDOFF.md#added-after-handoff)).
 - The client bundle was built against the wrong `VITE_SERVER_URL` — it is baked
   in at build time, so redeploying will not fix it.
