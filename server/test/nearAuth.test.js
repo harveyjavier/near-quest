@@ -7,9 +7,11 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { before, describe, it } from 'node:test';
 
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+
 import {
   SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, WALLET_SESSION_TTL_MS, assertAuthRate, issueNonce, nep413Hash, signInWithNear,
-  signOutNear, verifyNearSignIn,
+  ethSignInMessage, signInWithEthereum, signOutNear, verifyEthSignIn, verifyNearSignIn,
 } from '../src/auth/near.js';
 import { connectDatabase, createPlayerRecord, getRepo } from '../src/db/repo.js';
 
@@ -62,6 +64,38 @@ describe('verifyNearSignIn', () => {
 
   it('rejects an expired nonce', async () => {
     await assert.rejects(verifyNearSignIn(signedBody('alice.testnet'), { ...fullAccess, now: Date.now() + 6 * 60_000 }), { code: 'BAD_NONCE' });
+  });
+});
+
+const ethAccount = privateKeyToAccount(generatePrivateKey());
+const ETH_ADDRESS = ethAccount.address.toLowerCase();
+
+async function ethBody(address = ETH_ADDRESS, signer = ethAccount) {
+  const nonce = issueNonce();
+  const signature = await signer.signMessage({ message: ethSignInMessage({ address, nonce }) });
+  return { address, nonce, signature };
+}
+
+describe('verifyEthSignIn', () => {
+  it('accepts a personal_sign from the address it names', async () => {
+    assert.equal(await verifyEthSignIn(await ethBody()), ETH_ADDRESS);
+  });
+
+  it('rejects a signature from a different key', async () => {
+    const other = privateKeyToAccount(generatePrivateKey());
+    await assert.rejects(verifyEthSignIn(await ethBody(ETH_ADDRESS, other)), { code: 'BAD_SIGNATURE' });
+  });
+
+  it('rejects a replayed nonce', async () => {
+    const body = await ethBody();
+    await verifyEthSignIn(body);
+    await assert.rejects(verifyEthSignIn(body), { code: 'BAD_NONCE' });
+  });
+
+  it('rejects mixed-case and banned addresses', async () => {
+    await assert.rejects(verifyEthSignIn({ ...(await ethBody()), address: ethAccount.address }), { code: 'BAD_ACCOUNT' });
+    const banned = '0x0048501436e6325eff9756d804160dce4aaf3f3f';
+    await assert.rejects(verifyEthSignIn(await ethBody(banned)), { code: 'BANNED_ADDRESS' });
   });
 });
 
@@ -154,5 +188,14 @@ describe('signInWithNear', () => {
     await getRepo().insertPlayer(guest);
     await signOutNear(guest.sessionToken);
     assert.ok(await getRepo().findPlayerByToken(guest.sessionToken));
+  });
+
+  it('MetaMask sign-in binds the eth-implicit account like any wallet', async () => {
+    const guest = createPlayerRecord('Metamasker');
+    await getRepo().insertPlayer(guest);
+    const result = await signInWithEthereum({ ...(await ethBody()), sessionToken: guest.sessionToken });
+    assert.equal(result.source, 'guest');
+    assert.equal(result.accountId, ETH_ADDRESS);
+    assert.equal((await getRepo().findPlayerByToken(result.sessionToken)).nearAccountId, ETH_ADDRESS);
   });
 });

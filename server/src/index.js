@@ -17,7 +17,10 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 
 import { CLIENT_CATALOG, CONNECTION, ROOM_NAME } from './config/index.js';
 import { HarborRoom, releaseSession } from './rooms/HarborRoom.js';
-import { NEAR_NETWORK, SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, assertAuthRate, issueNonce, signInWithNear, signOutNear } from './auth/near.js';
+import {
+  NEAR_NETWORK, SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, assertAuthRate, ethSignInMessage, issueNonce,
+  signInWithEthereum, signInWithNear, signOutNear,
+} from './auth/near.js';
 import { connectDatabase, disconnectDatabase, getRepo, repoKind } from './db/repo.js';
 import { log } from './util/logger.js';
 
@@ -87,7 +90,12 @@ async function main() {
   app.get('/auth/near/challenge', (request, response) => {
     try {
       assertAuthRate(request.ip);
-      response.json({ nonce: issueNonce(), message: SIGN_IN_MESSAGE, recipient: SIGN_IN_RECIPIENT, network: NEAR_NETWORK });
+      const nonce = issueNonce();
+      const body = { nonce, message: SIGN_IN_MESSAGE, recipient: SIGN_IN_RECIPIENT, network: NEAR_NETWORK };
+      // MetaMask signs plain text, so hand it the exact text for its address.
+      const address = String(request.query.address ?? '');
+      if (/^0x[0-9a-f]{40}$/.test(address)) body.ethMessage = ethSignInMessage({ address, nonce });
+      response.json(body);
     } catch (error) {
       authError(response, error);
     }
@@ -97,6 +105,15 @@ async function main() {
     try {
       assertAuthRate(request.ip);
       response.json(await signInWithNear(request.body ?? {}, { releaseSession }));
+    } catch (error) {
+      authError(response, error);
+    }
+  });
+
+  app.post('/auth/eth', async (request, response) => {
+    try {
+      assertAuthRate(request.ip);
+      response.json(await signInWithEthereum(request.body ?? {}, { releaseSession }));
     } catch (error) {
       authError(response, error);
     }
@@ -113,7 +130,7 @@ async function main() {
   });
 
   app.get('/', (_request, response) =>
-    response.json({ name: 'Fishing Idle Game MMO', endpoints: ['/health', '/catalog', '/auth/near/challenge', '/auth/near', '/auth/signout'] }));
+    response.json({ name: 'Fishing Idle Game MMO', endpoints: ['/health', '/catalog', '/auth/near/challenge', '/auth/near', '/auth/eth', '/auth/signout'] }));
 
   // Express 5 error handler: never leak a stack trace to a browser.
   // eslint-disable-next-line no-unused-vars

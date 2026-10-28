@@ -12,6 +12,9 @@
 
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
 
+import { isBannedNearAddress } from '@aurora-is-near/is-banned-near-address';
+import { recoverMessageAddress } from 'viem';
+
 import { createPlayerRecord, getRepo } from '../db/repo.js';
 import { log } from '../util/logger.js';
 import { token } from '../util/rng.js';
@@ -33,6 +36,8 @@ const MAX_PENDING_NONCES = 10_000;
 const NEP413_TAG = 2 ** 31 + 413;
 
 const ACCOUNT_ID = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+
+export const isValidAccountId = (raw) => typeof raw === 'string' && ACCOUNT_ID.test(raw);
 
 /** base64 nonce -> expiresAt */
 const pending = new Map();
@@ -186,6 +191,67 @@ export async function verifyNearSignIn(body, { fetchAccessKey = rpcAccessKey, no
 }
 
 /**
+ * The exact text MetaMask shows and signs with personal_sign (EIP-191).
+ * The client gets it from the challenge endpoint rather than building it.
+ */
+export function ethSignInMessage({ address, nonce }) {
+  return `${SIGN_IN_MESSAGE} with NEAR account ${address}\n\n`
+    + `Recipient: ${SIGN_IN_RECIPIENT}\nNetwork: ${NEAR_NETWORK}\nNonce: ${nonce}`;
+}
+
+const ETH_ADDRESS = /^0x[0-9a-f]{40}$/;
+const ETH_SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
+
+/**
+ * MetaMask sign-in. An Ethereum address is also a NEAR account id (NEP-518
+ * "eth-implicit" account) whose wallet contract only obeys that address's key,
+ * so recovering the address from the signature proves control of the account.
+ * Resolves with the account id, or throws ValidationError.
+ */
+export async function verifyEthSignIn(body, { now = Date.now() } = {}) {
+  const { address, signature, nonce } = body ?? {};
+  if (typeof address !== 'string' || !ETH_ADDRESS.test(address)) {
+    throw new ValidationError('BAD_ACCOUNT', 'Invalid Ethereum address.');
+  }
+  if (typeof signature !== 'string' || !ETH_SIGNATURE.test(signature) || typeof nonce !== 'string') {
+    throw new ValidationError('BAD_SIGNATURE', 'Missing signature.');
+  }
+  if (!consumeNonce(nonce, now)) {
+    throw new ValidationError('BAD_NONCE', 'Sign-in expired. Please try again.');
+  }
+  // Addresses NEAR blocked from eth-implicit accounts (keys known to others).
+  if (isBannedNearAddress(address)) {
+    throw new ValidationError('BANNED_ADDRESS', 'This Ethereum address cannot be used on NEAR. Use another address.');
+  }
+
+  let recovered;
+  try {
+    recovered = await recoverMessageAddress({ message: ethSignInMessage({ address, nonce }), signature });
+  } catch {
+    throw new ValidationError('BAD_SIGNATURE', 'Signature does not match.');
+  }
+  if (recovered.toLowerCase() !== address) {
+    throw new ValidationError('BAD_SIGNATURE', 'Signature does not match.');
+  }
+  return address;
+}
+
+export async function signInWithEthereum(body, options = {}) {
+  return resolveWalletPlayer(await verifyEthSignIn(body, options), body, options);
+}
+
+export async function signInWithNear(body, options = {}) {
+  return resolveWalletPlayer(await verifyNearSignIn(body, options), body, options);
+}
+
+/** Refused before anything changes, so the player can still say no. */
+function switchRequired(player) {
+  const error = new ValidationError('SWITCH_REQUIRED', 'This wallet already has a save.');
+  error.details = { accountId: player.nearAccountId, displayName: player.displayName };
+  return error;
+}
+
+/**
  * Verified wallet -> a fresh sessionToken to play as.
  *
  * 1. The wallet already owns a player: that one, wherever it was made.
@@ -197,17 +263,8 @@ export async function verifyNearSignIn(body, { fetchAccessKey = rpcAccessKey, no
  * a leaked localStorage) stops working. `releaseSession` saves and evicts a
  * live seat on the old token first, so the room never writes back under it.
  */
-/** Refused before anything changes, so the player can still say no. */
-function switchRequired(player) {
-  const error = new ValidationError('SWITCH_REQUIRED', 'This wallet already has a save.');
-  error.details = { accountId: player.nearAccountId, displayName: player.displayName };
-  return error;
-}
-
-export async function signInWithNear(body, { releaseSession = async () => {}, ...options } = {}) {
-  const now = options.now ?? Date.now();
+async function resolveWalletPlayer(accountId, body, { releaseSession = async () => {}, now = Date.now() } = {}) {
   const sessionExpiresAt = now + WALLET_SESSION_TTL_MS;
-  const accountId = await verifyNearSignIn(body, options);
   const repo = getRepo();
 
   let player = await repo.findPlayerByNearAccount(accountId);
@@ -221,7 +278,7 @@ export async function signInWithNear(body, { releaseSession = async () => {}, ..
   }
 
   // Everything above is read-only. From here on the sign-in commits.
-  if (!consumeNonce(body.nonce, options.now ?? Date.now())) {
+  if (!consumeNonce(body.nonce, now)) {
     throw new ValidationError('BAD_NONCE', 'Sign-in expired. Please try again.');
   }
 
