@@ -77,6 +77,9 @@ import {
 /** How long a dropped client keeps its dock slot before being cleaned up. */
 const RECONNECT_GRACE_SECONDS = CONNECTION.reconnectGraceSeconds;
 
+/** Deposit check failures worth retrying: the chain or RPC may just be slow. */
+const RETRYABLE_DEPOSIT_CODES = new Set(['TX_PENDING', 'NEAR_UNAVAILABLE']);
+
 /** Join rejection for a wallet device whose token was rotated by a later sign-in. */
 export const SESSION_EXPIRED = 4401;
 
@@ -483,10 +486,24 @@ export class HarborRoom extends Room {
       if (!accountId) throw new ValidationError('WALLET_REQUIRED', 'Sign in with a NEAR wallet to deposit.');
       const txHash = validateTxHash(payload.txHash);
 
-      const { units, usdg } = await verifyUsdcDeposit({ txHash, accountId });
+      let verified;
+      try {
+        verified = await verifyUsdcDeposit({ txHash, accountId });
+      } catch (error) {
+        if (!(error instanceof ValidationError)) throw error;
+        // Tied to the hash so the client knows which saved deposit to retry or drop.
+        client.send('deposit_failed', {
+          txHash, code: error.code, message: error.message, retryable: RETRYABLE_DEPOSIT_CODES.has(error.code),
+        });
+        return;
+      }
+      const { units, usdg } = verified;
       const repo = getRepo();
       if (!await repo.insertDeposit({ txHash, accountId, units, usdg, status: 'pending', at: Date.now() })) {
-        client.send('deposit_claimed', { txHash, already: true });
+        // 'credited', or 'pending' if an earlier claim stopped before the save:
+        // the client keeps a pending hash, and an operator settles the row.
+        const row = await repo.findDeposit(txHash);
+        client.send('deposit_claimed', { txHash, status: row?.status ?? 'pending', already: true });
         return;
       }
       // The player may have left while RPC was answering. Free the claim so the
@@ -507,7 +524,7 @@ export class HarborRoom extends Room {
         log.error(`Deposit ${txHash} credited but not saved yet:`, error.message);
       }
       log.info(`Deposit ${txHash}: $${usdg} USDC from ${accountId}.`);
-      client.send('deposit_claimed', { txHash, already: false });
+      client.send('deposit_claimed', { txHash, status: 'credited', already: false });
       client.send('usdg_deposited', { ok: true, deposited: usdg, usdg: runtime.record.usdg });
       this.sendMe(client, runtime);
     });

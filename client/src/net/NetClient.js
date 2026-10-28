@@ -23,6 +23,15 @@ const STORAGE_KEYS = {
 /** A sent transfer the server hasn't confirmed is retried on each join for this long. */
 const PENDING_DEPOSIT_TTL_MS = 7 * 24 * 60 * 60_000;
 
+/** While connected, a slow chain or RPC is retried after these waits; then the next join tries again. */
+const DEPOSIT_RETRY_DELAYS_MS = [5_000, 15_000, 45_000, 120_000];
+
+function forgetPendingDeposit(txHash) {
+  const pending = readPendingDeposits();
+  delete pending[txHash];
+  writePendingDeposits(pending);
+}
+
 /** txHash -> { sentAt, accountId }, for transfers already on-chain but not yet credited. */
 function readPendingDeposits() {
   try {
@@ -210,11 +219,16 @@ export class NetClient {
     room.onMessage('rod_upgraded', (payload) => this.emit('rodUpgraded', payload));
     room.onMessage('purchased', (payload) => this.emit('purchased', payload));
     room.onMessage('usdg_deposited', (payload) => this.emit('usdgDeposited', payload));
-    room.onMessage('deposit_claimed', ({ txHash, already }) => {
-      const pending = readPendingDeposits();
-      delete pending[txHash];
-      writePendingDeposits(pending);
-      this.emit('depositClaimed', { txHash, already });
+    room.onMessage('deposit_claimed', ({ txHash, status, already }) => {
+      // A 'pending' row means an earlier claim stopped before the player was
+      // paid: keep the hash, the player has not been credited yet.
+      if (status === 'credited') forgetPendingDeposit(txHash);
+      this.emit('depositClaimed', { txHash, status, already });
+    });
+    room.onMessage('deposit_failed', (failure) => {
+      if (failure.retryable) this.scheduleDepositRetry(failure.txHash);
+      else forgetPendingDeposit(failure.txHash);
+      this.emit('depositFailed', failure);
     });
     room.onMessage('gold_bought', (payload) => this.emit('goldBought', payload));
     room.onMessage('consumable_used', (payload) => this.emit('consumableUsed', payload));
@@ -392,6 +406,19 @@ export class NetClient {
     const accountId = this.me?.nearAccountId;
     writePendingDeposits({ ...readPendingDeposits(), [txHash]: { sentAt: Date.now(), accountId } });
     this.send('claim_deposit', { txHash });
+  }
+
+  /** Backs off through DEPOSIT_RETRY_DELAYS_MS, only while this room is live. */
+  scheduleDepositRetry(txHash) {
+    this.depositRetries ??= new Map();
+    const attempt = this.depositRetries.get(txHash) ?? 0;
+    const delay = DEPOSIT_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return;
+    this.depositRetries.set(txHash, attempt + 1);
+    setTimeout(() => {
+      const entry = readPendingDeposits()[txHash];
+      if (!this.ended && this.room && entry) this.send('claim_deposit', { txHash });
+    }, delay);
   }
 
   retryPendingDeposits(accountId) {

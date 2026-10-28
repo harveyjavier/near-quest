@@ -641,8 +641,15 @@ export class Hud {
       this.refreshShop();
     });
 
-    net.on('depositClaimed', ({ already }) => {
-      if (already) this.toast('That deposit was already credited.', 'warn');
+    net.on('depositClaimed', ({ already, status }) => {
+      if (!already) return;
+      this.toast(status === 'credited'
+        ? 'That deposit was already credited.'
+        : 'That deposit is still being processed. It will be credited, or support can settle it.', 'warn');
+    });
+
+    net.on('depositFailed', ({ message, retryable }) => {
+      this.toast(retryable ? message : `Deposit not credited: ${message}`, 'warn');
     });
 
     net.on('usdgDeposited', (result) => {

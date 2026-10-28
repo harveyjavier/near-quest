@@ -161,6 +161,10 @@ function mongoBackend({ Player, ChatMessage, World, Deposit }) {
       }
     },
 
+    async findDeposit(txHash) {
+      return Deposit.findOne({ txHash }, { _id: 0 }).lean().exec();
+    },
+
     async setDepositStatus(txHash, status) {
       await Deposit.updateOne({ txHash }, { $set: { status } }).exec();
     },
@@ -282,6 +286,11 @@ function memoryBackend() {
       if (deposits.has(row.txHash)) return false;
       deposits.set(row.txHash, { ...row });
       return true;
+    },
+
+    async findDeposit(txHash) {
+      const row = deposits.get(txHash);
+      return row ? { ...row } : null;
     },
 
     async setDepositStatus(txHash, status) {
