@@ -261,8 +261,10 @@ usually fixes itself on the next visit.
 
 Sign-in with a NEAR wallet and deposit checks fail with `NEAR_UNAVAILABLE`.
 MetaMask sign-in still works (it needs no RPC), guests are unaffected, and
-pending deposits retry on the next join. If the public RPC is unreliable, point
-`NEAR_RPC_URL` at a paid provider.
+pending deposits retry a few times while the player stays connected, then on
+each join. The public RPC is rate-limited; production should use a dedicated
+provider. A transaction the main RPC has forgotten (older than a few days) is
+looked up on `NEAR_ARCHIVAL_RPC_URL`; that claim takes up to ~15 s longer.
 
 ---
 

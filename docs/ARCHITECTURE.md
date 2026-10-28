@@ -232,15 +232,20 @@ player to it (`nearAccountId`, one player per account). The wire format is in
   account id (an eth-implicit account, NEP-518). Addresses on NEAR's banned
   list are refused.
 - **Challenges** are 32 random bytes, used once, valid 5 minutes, capped at
-  10,000 outstanding and 20 auth requests per IP per minute.
+  10,000 outstanding and 20 auth requests per IP per minute. A challenge is
+  only spent when a session is issued. The per-IP count only sees real client
+  IPs when `TRUST_PROXY` matches the proxies in front of the server.
 - **Sign-in still ends in a session token**, so the room join is the same for
   guests and wallets. But each wallet sign-in issues a new token and kills the
   old one, saving and kicking any seat on it first. Wallet tokens also expire
   after 30 days, and `POST /auth/signout` revokes one. A wallet device whose
   token died gets "sign in again" (join code 4401), never a fresh guest.
+  Expiry is checked when a player joins, not during play: a session that
+  expires mid-play runs until the player leaves or reconnects.
 - **First wallet sign-in on a device** binds that device's guest save, unless
-  the wallet already owns a player, in which case the player is asked before
-  the guest save is left behind.
+  the wallet already owns a player. Then the server refuses with
+  `SWITCH_REQUIRED` before changing anything, the player is asked, and only a
+  confirmed retry rotates the wallet's token.
 
 Guest tokens never expire and can't be revoked from the server, because a guest
 has no way back in.

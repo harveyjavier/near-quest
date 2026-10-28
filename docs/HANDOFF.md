@@ -309,11 +309,14 @@ delivery above. Details: [ARCHITECTURE.md](ARCHITECTURE.md#identity-guests-and-w
    and a stake with real-value inputs can count as gambling in some places.
    Settle both before setting a treasury in production. This is not a
    developer's call.
-2. **Real-wallet test.** Every flow is tested with stand-ins, never a live
-   wallet. Do one testnet sign-in and one small deposit with each of MetaMask,
-   Meteor, HERE and MyNearWallet.
+2. **Real-wallet test.** Sign-in and deposits are tested with stand-in
+   wallets. The deposit check also runs against one real relayed testnet USDC
+   transfer (a captured RPC response), but no deposit of ours has gone through
+   end to end. Do one testnet sign-in and one small deposit with each of
+   MetaMask, Meteor, HERE and MyNearWallet.
 3. **USDC contract ids** in `server/src/config/near.config.js` were written
-   from memory. Check them against Circle's published addresses.
+   from memory. The testnet id is confirmed live (real `ft_transfer` traffic);
+   check the mainnet one against Circle's published addresses.
 4. **Treasury setup**: create it, register it for storage on the USDC contract,
    keep its keys offline. Steps in [OPERATIONS.md](OPERATIONS.md#turning-them-on).
 

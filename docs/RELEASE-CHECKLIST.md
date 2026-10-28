@@ -31,6 +31,9 @@ order and the gates.
       proxy in front). Without `TRUST_PROXY` every player shares the proxy's
       IP for the sign-in rate limit; with it set off-platform, clients can
       spoof their IP.
+- [ ] `NEAR_RPC_URL` points at a dedicated NEAR RPC provider, not the public
+      `rpc.mainnet.near.org`, which is heavily rate-limited. Set
+      `NEAR_ARCHIVAL_RPC_URL` to the same provider's archival endpoint.
 - [ ] NEAR variables: `NEAR_NETWORK=mainnet` for the public game, and
       `ALLOW_FAKE_DEPOSITS` **unset**. If deposits are going live, also
       `NEAR_TREASURY_ACCOUNT` and the steps in
