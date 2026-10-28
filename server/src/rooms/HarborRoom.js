@@ -170,7 +170,9 @@ export class HarborRoom extends Room {
     }
 
     // A wallet device must never silently fall back to a fresh guest, and a
-    // wallet save needs a fresh signature once its session runs out.
+    // wallet save needs a fresh signature once its session runs out. Expiry is
+    // only checked here, at join: a session that expires mid-play runs on
+    // until the player leaves or reconnects.
     const walletExpired = record?.nearAccountId && !(record.sessionExpiresAt > Date.now());
     if (walletExpired || (!record && requested.walletSession === true)) {
       throw new ServerError(SESSION_EXPIRED, 'Your wallet session has expired. Please sign in again.');
