@@ -47,8 +47,11 @@ async function main() {
 
   const app = express();
   app.disable('x-powered-by');
-  // Railway/Heroku put one proxy in front; without this every request.ip is the proxy's.
-  app.set('trust proxy', 1);
+  // How many proxies sit in front (Railway: 1). Off by default: without a real
+  // proxy, X-Forwarded-For is whatever the client sends, and trusting it would
+  // let anyone pick their own request.ip and dodge the auth rate limit.
+  const trustProxy = String(process.env.TRUST_PROXY || '').trim();
+  if (/^\d+$/.test(trustProxy) && Number(trustProxy) > 0) app.set('trust proxy', Number(trustProxy));
   app.use(cors(corsOptions()));
   app.use(express.json({ limit: '16kb' }));
 

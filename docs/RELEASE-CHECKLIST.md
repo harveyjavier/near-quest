@@ -27,6 +27,9 @@ order and the gates.
       and `PORT` **unset**.
 - [ ] `CORS_ORIGIN` lists every origin players actually use — `web.app`,
       `firebaseapp.com`, and any custom domain, scheme included.
+- [ ] `TRUST_PROXY=1` (Railway/Heroku have one proxy in front). Without
+      `TRUST_PROXY` every player shares the proxy's IP for the sign-in rate
+      limit; with it set off-platform, clients can spoof their IP.
 - [ ] `numReplicas` is still `1` in `server/railway.json`.
 - [ ] A verified database backup exists, dated today. Verified means restored
       into a scratch database, not merely listed in a console.
