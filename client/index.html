@@ -43,12 +43,15 @@
           Start fishing
         </button>
 
-        <button id="gate-wallet" class="gate__forget" type="button">
-          Sign in with NEAR wallet
-        </button>
-        <button id="gate-metamask" class="gate__forget" type="button">
-          Sign in with MetaMask
-        </button>
+        <!-- One row, so the wallet options never sit on top of the returning-player links. -->
+        <div class="gate__wallets">
+          <button id="gate-wallet" class="gate__forget" type="button">
+            Sign in with NEAR wallet
+          </button>
+          <button id="gate-metamask" class="gate__forget" type="button">
+            Sign in with MetaMask
+          </button>
+        </div>
 
         <p id="gate-returning" class="gate__returning" hidden></p>
         <button id="gate-forget" class="gate__forget" type="button" hidden>

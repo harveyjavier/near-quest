@@ -99,6 +99,19 @@ describe('wallet UI', { skip: !existsSync(CHROME) && `no Chromium at ${CHROME}` 
     const page = await openGame();
     assert.equal(await page.locator('#gate-wallet').textContent().then((t) => t.trim()), 'Sign in with NEAR wallet');
     assert.equal(await page.locator('#gate-metamask').textContent().then((t) => t.trim()), 'Sign in with MetaMask');
+
+    // A returning player sees three links under the button; none may cover another.
+    await page.evaluate(() => {
+      localStorage.setItem('fishing-idle.sessionToken', 'a'.repeat(64));
+      localStorage.setItem('fishing-idle.displayName', 'Guesty');
+    });
+    await page.reload();
+    const boxes = await Promise.all(['#gate-returning', '#gate-wallet', '#gate-metamask', '#gate-forget']
+      .map((id) => page.locator(id).boundingBox()));
+    const overlap = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) assert.equal(overlap(boxes[i], boxes[j]), false, `gate controls ${i} and ${j} overlap`);
+    }
     await page.close();
   });
 
