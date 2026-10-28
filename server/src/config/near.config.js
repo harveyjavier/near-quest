@@ -3,7 +3,8 @@
  *
  * Deposits are on-chain only when NEAR_TREASURY_ACCOUNT is set. Without it the
  * fake deposit (credits USDG for nothing) works only if ALLOW_FAKE_DEPOSITS is
- * "true", which is meant for local development.
+ * "true" and NODE_ENV is not "production", so a copied dev .env can't hand out
+ * free money in production.
  */
 
 export const NEAR_NETWORK = process.env.NEAR_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
@@ -16,10 +17,11 @@ const USDC_CONTRACTS = {
 };
 
 const treasury = (process.env.NEAR_TREASURY_ACCOUNT || '').trim();
+const fakeAllowed = process.env.ALLOW_FAKE_DEPOSITS === 'true' && process.env.NODE_ENV !== 'production';
 
 export const DEPOSITS = Object.freeze({
   // 'chain' | 'fake' | 'off'
-  mode: treasury ? 'chain' : process.env.ALLOW_FAKE_DEPOSITS === 'true' ? 'fake' : 'off',
+  mode: treasury ? 'chain' : fakeAllowed ? 'fake' : 'off',
   network: NEAR_NETWORK,
   usdcContract: process.env.NEAR_USDC_CONTRACT || USDC_CONTRACTS[NEAR_NETWORK],
   usdcDecimals: 6,

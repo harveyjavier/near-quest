@@ -3,6 +3,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 
 import { validateTxHash, verifyUsdcDeposit } from '../src/payments/usdc.js';
@@ -48,3 +49,22 @@ describe('verifyUsdcDeposit', () => {
     assert.throws(() => validateTxHash('0xdeadbeef'), { code: 'BAD_TX' });
   });
 });
+
+describe('deposit mode', () => {
+  // Read once at import, so each case runs in its own process.
+  const modeWith = (env) => execFileSync(process.execPath, [
+    '--input-type=module', '-e',
+    "const { DEPOSITS } = await import('./src/config/near.config.js'); process.stdout.write(DEPOSITS.mode);",
+  ], { env: { PATH: process.env.PATH, ...env } }).toString();
+
+  it('is off unless a treasury is set or fake deposits are asked for', () => {
+    assert.equal(modeWith({}), 'off');
+    assert.equal(modeWith({ NEAR_TREASURY_ACCOUNT: 'treasury.testnet' }), 'chain');
+    assert.equal(modeWith({ ALLOW_FAKE_DEPOSITS: 'true' }), 'fake');
+  });
+
+  it('never fakes deposits in production', () => {
+    assert.equal(modeWith({ ALLOW_FAKE_DEPOSITS: 'true', NODE_ENV: 'production' }), 'off');
+  });
+});
+
