@@ -8,7 +8,7 @@
  */
 
 import { nearRpc } from '../auth/near.js';
-import { DEPOSITS } from '../config/near.config.js';
+import { DEPOSITS, NEAR_ARCHIVAL_RPC_URL } from '../config/near.config.js';
 import { ValidationError } from '../util/validate.js';
 
 const TX_HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
@@ -17,6 +17,13 @@ const UNITS_PER_CENT = 10n ** BigInt(DEPOSITS.usdcDecimals - 2);
 const fail = (code, message) => {
   throw new ValidationError(code, message);
 };
+
+/** NEAR answers an unknown or garbage-collected hash with one of these. */
+function isUnknownTransaction(error) {
+  const cause = error?.cause;
+  return cause?.name === 'UNKNOWN_TRANSACTION'
+    || (cause?.name === 'TIMEOUT_ERROR' && cause.info?.cause === 'NOT_OBSERVED');
+}
 
 export function validateTxHash(raw) {
   if (typeof raw !== 'string' || !TX_HASH.test(raw)) fail('BAD_TX', 'That is not a NEAR transaction hash.');
@@ -33,14 +40,25 @@ export function validateTxHash(raw) {
  * predecessor is the player moved the player's own tokens, whoever relayed it.
  * `senderId` is the transaction signer, used only to look the transaction up.
  */
-export async function verifyUsdcDeposit({ txHash, accountId, senderId = accountId }, { rpc = nearRpc, deposits = DEPOSITS } = {}) {
-  let body;
-  try {
-    // FINAL so a transfer can't be credited and then dropped.
-    body = await rpc('EXPERIMENTAL_tx_status', { tx_hash: txHash, sender_account_id: senderId, wait_until: 'FINAL' }, { timeoutMs: 20_000 });
-  } catch {
-    fail('NEAR_UNAVAILABLE', 'Could not reach the NEAR network. Your deposit is safe; it will be checked again.');
+export async function verifyUsdcDeposit(
+  { txHash, accountId, senderId = accountId },
+  { rpc = nearRpc, deposits = DEPOSITS, archivalUrl = NEAR_ARCHIVAL_RPC_URL } = {},
+) {
+  // FINAL so a transfer can't be credited and then dropped.
+  const lookup = (url) => rpc(
+    'EXPERIMENTAL_tx_status',
+    { tx_hash: txHash, sender_account_id: senderId, wait_until: 'FINAL' },
+    { timeoutMs: 15_000, url },
+  );
+  // Regular nodes drop transactions after a few days, but the client retries
+  // claims for 7, so an unknown hash may simply be old. For an old hash the main
+  // node often holds the request until our timeout rather than saying so; an
+  // archival node also has recent transactions, so either way it is asked next.
+  let body = await lookup().catch(() => null);
+  if ((!body || isUnknownTransaction(body.error)) && archivalUrl) {
+    body = await lookup(archivalUrl).catch(() => body);
   }
+  if (!body) fail('NEAR_UNAVAILABLE', 'Could not reach the NEAR network. Your deposit is safe; it will be checked again.');
   if (body?.error || !body?.result) {
     fail('TX_PENDING', 'That transaction is not final yet. It will be checked again.');
   }

@@ -73,6 +73,7 @@ describe('wallet UI', { skip: !existsSync(CHROME) && `no Chromium at ${CHROME}` 
         CORS_ORIGIN: '',
         NEAR_NETWORK: 'testnet',
         NEAR_RPC_URL: 'http://127.0.0.1:9', // nothing listens: the test must not reach the real network
+        NEAR_ARCHIVAL_RPC_URL: 'http://127.0.0.1:9',
         NEAR_TREASURY_ACCOUNT: '',
         ALLOW_FAKE_DEPOSITS: '',
       },

@@ -124,8 +124,8 @@ export function nep413Hash({ message, nonce, recipient, callbackUrl = null }) {
 }
 
 /** One JSON-RPC call. Resolves with `{ result, error }` as NEAR returns them. */
-export async function nearRpc(method, params, { timeoutMs = 8000 } = {}) {
-  const response = await fetch(NEAR_RPC_URL, {
+export async function nearRpc(method, params, { timeoutMs = 8000, url = NEAR_RPC_URL } = {}) {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 'game', method, params }),

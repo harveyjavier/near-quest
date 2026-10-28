@@ -179,6 +179,11 @@ and the expired-session message.
 It uses the system Chromium (`/usr/bin/chromium`, or set `CHROME_PATH`) and
 downloads no browser. Without one, the suite is skipped.
 
+`server/test/fixtures/testnet-usdc-ft_transfer.json` is a real
+`EXPERIMENTAL_tx_status` response for a relayed USDC transfer on testnet,
+captured from the archival RPC. It pins the response shape the deposit check
+reads.
+
 ### End-to-end — `npm run smoke`
 
 Drives a **real running server** with the real client library and asserts the

@@ -4,6 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { validateTxHash, verifyUsdcDeposit } from '../src/payments/usdc.js';
@@ -76,6 +77,70 @@ describe('verifyUsdcDeposit', () => {
   it('validates the hash shape', () => {
     assert.equal(validateTxHash(TX), TX);
     assert.throws(() => validateTxHash('0xdeadbeef'), { code: 'BAD_TX' });
+  });
+});
+
+describe('verifyUsdcDeposit against a real testnet response', () => {
+  // EXPERIMENTAL_tx_status for testnet tx F2wHrmW1TGqg59xDbUiR2SqXF2MPuivnod4TcE1FvR84,
+  // captured from archival-rpc.testnet.near.org. A relayed transfer: near-stocks-seq
+  // signs, the near-stocks contract then calls ft_transfer on Circle's testnet
+  // USDC, sending 4.5 USDC to near-stocks-user1.
+  const real = JSON.parse(readFileSync(new URL('./fixtures/testnet-usdc-ft_transfer.json', import.meta.url)));
+  const testnet = {
+    usdcContract: '3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af',
+    usdcDecimals: 6,
+    treasury: 'near-stocks-user1.testnet',
+  };
+  const verify = (accountId, deposit = testnet) => verifyUsdcDeposit(
+    { txHash: 'F2wHrmW1TGqg59xDbUiR2SqXF2MPuivnod4TcE1FvR84', accountId, senderId: 'near-stocks-seq.testnet' },
+    { rpc: async () => real, deposits: deposit },
+  );
+
+  it('credits the account whose tokens moved', async () => {
+    assert.deepEqual(await verify('near-stocks.testnet'), { units: '4500000', usdg: 4.5 });
+  });
+
+  it('asks the archival RPC when the main RPC has forgotten the transaction', async () => {
+    // What rpc.testnet.near.org actually answered for this hash once it aged out.
+    const forgotten = { error: { name: 'HANDLER_ERROR', cause: { name: 'TIMEOUT_ERROR', info: { cause: 'NOT_OBSERVED' } } } };
+    const asked = [];
+    const rpc = async (method, params, { url } = {}) => {
+      asked.push(url ?? 'main');
+      return url === 'https://archive.example' ? real : forgotten;
+    };
+    const result = await verifyUsdcDeposit(
+      { txHash: 'F2wHrmW1TGqg59xDbUiR2SqXF2MPuivnod4TcE1FvR84', accountId: 'near-stocks.testnet', senderId: 'near-stocks-seq.testnet' },
+      { rpc, deposits: testnet, archivalUrl: 'https://archive.example' },
+    );
+    assert.deepEqual(result, { units: '4500000', usdg: 4.5 });
+    assert.deepEqual(asked, ['main', 'https://archive.example']);
+  });
+
+  it('asks the archival RPC when the main RPC times out on an old hash', async () => {
+    const rpc = async (method, params, { url } = {}) => {
+      if (url !== 'https://archive.example') throw new Error('The operation was aborted due to timeout');
+      return real;
+    };
+    const result = await verifyUsdcDeposit(
+      { txHash: 'F2wHrmW1TGqg59xDbUiR2SqXF2MPuivnod4TcE1FvR84', accountId: 'near-stocks.testnet', senderId: 'near-stocks-seq.testnet' },
+      { rpc, deposits: testnet, archivalUrl: 'https://archive.example' },
+    );
+    assert.deepEqual(result, { units: '4500000', usdg: 4.5 });
+  });
+
+  it('does not touch the archival RPC when the main one has the transaction', async () => {
+    const asked = [];
+    const rpc = async (method, params, { url } = {}) => { asked.push(url ?? 'main'); return real; };
+    await verifyUsdcDeposit(
+      { txHash: 'F2wHrmW1TGqg59xDbUiR2SqXF2MPuivnod4TcE1FvR84', accountId: 'near-stocks.testnet', senderId: 'near-stocks-seq.testnet' },
+      { rpc, deposits: testnet, archivalUrl: 'https://archive.example' },
+    );
+    assert.deepEqual(asked, ['main']);
+  });
+
+  it('gives nothing to the relayer that signed, or to a different treasury', async () => {
+    await assert.rejects(verify('near-stocks-seq.testnet'), { code: 'TX_NOT_DEPOSIT' });
+    await assert.rejects(verify('near-stocks.testnet', { ...testnet, treasury: 'treasury.testnet' }), { code: 'TX_NOT_DEPOSIT' });
   });
 });
 
