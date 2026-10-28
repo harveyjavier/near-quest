@@ -32,7 +32,7 @@ function forgetPendingDeposit(txHash) {
   writePendingDeposits(pending);
 }
 
-/** txHash -> { sentAt, accountId }, for transfers already on-chain but not yet credited. */
+/** txHash -> { sentAt, accountId, senderId }, for transfers already on-chain but not yet credited. */
 function readPendingDeposits() {
   try {
     return JSON.parse(readStorage(STORAGE_KEYS.pendingDeposits) || '{}');
@@ -402,10 +402,10 @@ export class NetClient {
    * Asks the server to credit an on-chain USDC transfer. The hash is kept
    * until the server confirms, so a dropped tab or RPC hiccup is retried.
    */
-  claimDeposit(txHash) {
+  claimDeposit(txHash, senderId) {
     const accountId = this.me?.nearAccountId;
-    writePendingDeposits({ ...readPendingDeposits(), [txHash]: { sentAt: Date.now(), accountId } });
-    this.send('claim_deposit', { txHash });
+    writePendingDeposits({ ...readPendingDeposits(), [txHash]: { sentAt: Date.now(), accountId, senderId } });
+    this.send('claim_deposit', { txHash, senderId });
   }
 
   /** Backs off through DEPOSIT_RETRY_DELAYS_MS, only while this room is live. */
@@ -426,7 +426,7 @@ export class NetClient {
     const pending = readPendingDeposits();
     for (const [txHash, entry] of Object.entries(pending)) {
       if (!(now - entry?.sentAt <= PENDING_DEPOSIT_TTL_MS)) delete pending[txHash];
-      else if (entry.accountId === accountId) this.send('claim_deposit', { txHash });
+      else if (entry.accountId === accountId) this.send('claim_deposit', { txHash, senderId: entry.senderId });
     }
     writePendingDeposits(pending);
   }

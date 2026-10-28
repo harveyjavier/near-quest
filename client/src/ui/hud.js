@@ -4498,8 +4498,8 @@ export class Hud {
     button.disabled = true;
     try {
       const { sendUsdcDeposit } = await import('../net/nearWallet.js');
-      const txHash = await sendUsdcDeposit({ deposits, accountId, usdg });
-      this.net.claimDeposit(txHash);
+      const { txHash, senderId } = await sendUsdcDeposit({ deposits, accountId, usdg });
+      this.net.claimDeposit(txHash, senderId);
       this.toast('Transfer sent. Confirming on NEAR...', 'good');
     } catch (error) {
       console.error('USDC deposit failed:', error);

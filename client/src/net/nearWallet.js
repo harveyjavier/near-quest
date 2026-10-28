@@ -17,19 +17,54 @@ const HTTP_URL = SERVER_URL.replace(/^ws/, 'http');
 
 let selectorPromise = null;
 
+/** NEAR's Ethereum-compatible RPC, which MetaMask talks to. */
+const NEAR_EVM_CHAINS = {
+  mainnet: {
+    id: 397,
+    name: 'NEAR Protocol',
+    nativeCurrency: { decimals: 18, name: 'NEAR', symbol: 'NEAR' },
+    rpcUrls: { default: { http: ['https://eth-rpc.mainnet.near.org'] } },
+    blockExplorers: { default: { name: 'NEAR Explorer', url: 'https://eth-explorer.near.org' } },
+  },
+  testnet: {
+    id: 398,
+    name: 'NEAR Protocol Testnet',
+    nativeCurrency: { decimals: 18, name: 'NEAR', symbol: 'NEAR' },
+    rpcUrls: { default: { http: ['https://eth-rpc.testnet.near.org'] } },
+    blockExplorers: { default: { name: 'NEAR Explorer', url: 'https://eth-explorer-testnet.near.org' } },
+    testnet: true,
+  },
+};
+
 async function getSelector(network) {
   selectorPromise ??= (async () => {
-    const [{ setupWalletSelector, actionCreators }, { setupModal }, { setupMeteorWallet }, { setupHereWallet }, { setupMyNearWallet }] = await Promise.all([
+    const [
+      { setupWalletSelector, actionCreators }, { setupModal }, { setupMeteorWallet }, { setupHereWallet },
+      { setupMyNearWallet }, { setupEthereumWallets }, wagmi, { defineChain },
+    ] = await Promise.all([
       import('@near-wallet-selector/core'),
       import('@near-wallet-selector/modal-ui'),
       import('@near-wallet-selector/meteor-wallet'),
       import('@near-wallet-selector/here-wallet'),
       import('@near-wallet-selector/my-near-wallet'),
+      import('@near-wallet-selector/ethereum-wallets'),
+      import('@wagmi/core'),
+      import('viem'),
       import('@near-wallet-selector/modal-ui/styles.css'),
     ]);
+    const chain = defineChain(NEAR_EVM_CHAINS[network]);
+    const wagmiConfig = wagmi.createConfig({
+      chains: [chain],
+      transports: { [chain.id]: wagmi.http() },
+      connectors: [wagmi.injected({ shimDisconnect: true })],
+    });
     const selector = await setupWalletSelector({
       network,
-      modules: [setupMeteorWallet(), setupHereWallet(), setupMyNearWallet()],
+      modules: [
+        setupMeteorWallet(), setupHereWallet(), setupMyNearWallet(),
+        // MetaMask and other injected Ethereum wallets, on NEAR's EVM-compatible RPC (NEP-518).
+        setupEthereumWallets({ wagmiConfig, wagmiCore: wagmi, skipSignInAccessKey: true }),
+      ],
     });
     return { selector, modal: setupModal(selector, {}), actionCreators };
   })();
@@ -156,7 +191,37 @@ export async function sendUsdcDeposit({ deposits, accountId, usdg }) {
       1n, // ft_transfer requires exactly 1 yoctoNEAR
     )],
   });
-  const hash = outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id;
-  if (!hash) throw new Error('The wallet did not return a transaction.');
-  return hash;
+  const txHash = outcome?.transaction?.hash ?? outcome?.transaction_outcome?.id;
+  if (!txHash) throw new Error('The wallet did not return a transaction.');
+  // MetaMask transfers are signed by a relayer; the server needs it to look the transaction up.
+  return { txHash, senderId: outcome.transaction?.signer_id ?? accountId };
+}
+
+/** Hex-encodes UTF-8 text for personal_sign. */
+export function utf8ToHex(text) {
+  return `0x${[...new TextEncoder().encode(text)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * MetaMask sign-in. MetaMask can't sign NEP-413, so it signs the server's
+ * challenge text with personal_sign; the server recovers the address, which is
+ * also the player's NEAR account id (an eth-implicit account).
+ */
+export async function signInWithMetaMask({ sessionToken, displayName }) {
+  const { ethereum } = window;
+  if (!ethereum?.request) throw new Error('MetaMask is not installed in this browser.');
+
+  const [address] = await ethereum.request({ method: 'eth_requestAccounts' });
+  if (!address) throw new Error('MetaMask did not share an account.');
+  const accountId = address.toLowerCase();
+
+  const challenge = await readJson(await fetch(`${HTTP_URL}/auth/near/challenge?address=${accountId}`));
+  if (!challenge.ethMessage) throw new Error('The server did not send a sign-in message.');
+  const signature = await ethereum.request({ method: 'personal_sign', params: [utf8ToHex(challenge.ethMessage), address] });
+
+  return readJson(await fetch(`${HTTP_URL}/auth/eth`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ address: accountId, nonce: challenge.nonce, signature, sessionToken, displayName }),
+  }));
 }
