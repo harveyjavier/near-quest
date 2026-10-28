@@ -417,7 +417,7 @@ export class NetClient {
     this.depositRetries.set(txHash, attempt + 1);
     setTimeout(() => {
       const entry = readPendingDeposits()[txHash];
-      if (!this.ended && this.room && entry) this.send('claim_deposit', { txHash });
+      if (!this.ended && this.room && entry) this.send('claim_deposit', { txHash, senderId: entry.senderId });
     }, delay);
   }
 
