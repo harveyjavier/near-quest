@@ -16,6 +16,7 @@ import { Client, getStateCallbacks } from '@colyseus/sdk';
 const STORAGE_KEYS = {
   sessionToken: 'fishing-idle.sessionToken',
   displayName: 'fishing-idle.displayName',
+  nearAccountId: 'fishing-idle.nearAccountId',
 };
 
 /** How often the client asks the room to prove it is still there. */
@@ -59,11 +60,23 @@ export function storedSessionToken() {
   return readStorage(STORAGE_KEYS.sessionToken);
 }
 
+export function storedNearAccount() {
+  return readStorage(STORAGE_KEYS.nearAccountId);
+}
+
+/** Adopts a session issued by wallet sign-in. */
+export function storeSession(sessionToken, displayName, nearAccountId) {
+  writeStorage(STORAGE_KEYS.sessionToken, sessionToken);
+  writeStorage(STORAGE_KEYS.displayName, displayName);
+  writeStorage(STORAGE_KEYS.nearAccountId, nearAccountId);
+}
+
 /** Clears the guest session. Used by the "start over" affordance. */
 export function forgetSession() {
   try {
     window.localStorage.removeItem(STORAGE_KEYS.sessionToken);
     window.localStorage.removeItem(STORAGE_KEYS.displayName);
+    window.localStorage.removeItem(STORAGE_KEYS.nearAccountId);
   } catch {
     // Nothing to do -- storage was unavailable, so nothing was stored.
   }
@@ -128,6 +141,8 @@ export class NetClient {
     const options = {};
     if (sessionToken) options.sessionToken = sessionToken;
     if (displayName) options.displayName = displayName;
+    // Tells the server to refuse rather than mint a fresh guest if the token was rotated away.
+    if (sessionToken && storedNearAccount()) options.walletSession = true;
 
     this.room = await client.joinOrCreate(this.roomName, options);
     this.$ = getStateCallbacks(this.room);
