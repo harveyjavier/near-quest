@@ -390,6 +390,8 @@ export class Hud {
       gold: byId('hud-gold'),
       goldPill: byId('wallet-gold-pill'),
       usdg: byId('hud-usdg'),
+      near: byId('hud-near'),
+      nearAccount: byId('hud-near-account'),
       usdgPill: byId('wallet-usdg-pill'),
       btnDeposit: byId('btn-deposit'),
       pearls: byId('hud-pearls'),
@@ -637,6 +639,17 @@ export class Hud {
         .map(([id, amount]) => `${formatNumber(amount)} ${this.rewardName(id)}`);
       this.toast(`Bought ${parts.join(', ')}`, 'good');
       this.refreshShop();
+    });
+
+    net.on('depositClaimed', ({ already, status }) => {
+      if (!already) return;
+      this.toast(status === 'credited'
+        ? 'That deposit was already credited.'
+        : 'That deposit is still being processed. It will be credited, or support can settle it.', 'warn');
+    });
+
+    net.on('depositFailed', ({ message, retryable }) => {
+      this.toast(retryable ? message : `Deposit not credited: ${message}`, 'warn');
     });
 
     net.on('usdgDeposited', (result) => {
@@ -913,6 +926,14 @@ export class Hud {
     dom.gold.textContent = formatNumber(me.gold);
     dom.pearls.textContent = formatNumber(me.pearls);
     dom.usdg.textContent = this.formatUsdg(me.usdg ?? 0);
+
+    const account = me.nearAccountId;
+    dom.near.hidden = !account;
+    if (account) {
+      // Implicit accounts are 64 hex chars; keep the chip readable.
+      dom.nearAccount.textContent = account.length > 24 ? `${account.slice(0, 8)}…${account.slice(-6)}` : account;
+      dom.nearAccount.title = `Signed in with NEAR as ${account}`;
+    }
 
     for (const chip of dom.stakes.children) {
       const stake = Number(chip.dataset.stake);
@@ -2710,8 +2731,10 @@ export class Hud {
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'btn chestopen__spin';
-    open.textContent = 'Open chest';
+    const keyCost = this.chestKeyCost(stack.tier);
+    open.textContent = keyCost ? `Open chest (${keyCost} Gold)` : 'Open chest';
     open.onclick = () => {
+      if (!this.canPayChestKey(stack.tier)) return;
       this.markOpening(open);
       this.startReel();
       this.openNextChest();
@@ -2728,6 +2751,7 @@ export class Hud {
       all.className = 'btn chestopen__all';
       all.textContent = `Open all (${remaining.length})`;
       all.onclick = () => {
+        if (!this.canPayChestKey(stack.tier)) return;
         this.chest.auto = true;
         all.disabled = true;
         open.disabled = true;
@@ -2748,10 +2772,29 @@ export class Hud {
     return held?.length ? held.map((chest) => chest.id) : [...fallbackIds];
   }
 
+  /** Gold to open one chest of `tier`, from the catalog. */
+  chestKeyCost(tier) {
+    return this.catalog?.chestTiers?.find((entry) => entry.id === tier)?.keyCost ?? 0;
+  }
+
+  /**
+   * Whether the player can pay this tier's key, with a toast when not. Checked
+   * before the reel starts; the server is what actually enforces it.
+   */
+  canPayChestKey(tier) {
+    const cost = this.chestKeyCost(tier);
+    if ((this.me?.gold ?? 0) >= cost) return true;
+    this.toast(`Opening this chest costs ${formatNumber(cost)} Gold.`, 'warn');
+    return false;
+  }
+
   /** Sends the next chest of the open session's tier, if one is still held. */
   openNextChest() {
-    const next = this.chestsInStack(this.chest?.tier ?? '')[0];
+    const tier = this.chest?.tier ?? '';
+    const next = this.chestsInStack(tier)[0];
     if (!next) return false;
+    // Open all stops here, quietly, when the Gold for the next key runs out.
+    if ((this.me?.gold ?? 0) < this.chestKeyCost(tier)) return false;
 
     this.net.openChest(next);
     return true;
@@ -3212,8 +3255,10 @@ export class Hud {
     const again = document.createElement('button');
     again.type = 'button';
     again.className = 'btn chestopen__spin';
-    again.textContent = 'Open another';
+    const keyCost = this.chestKeyCost(session.tier);
+    again.textContent = keyCost ? `Open another (${keyCost} Gold)` : 'Open another';
     again.onclick = () => {
+      if (!this.canPayChestKey(session.tier)) return;
       this.markOpening(again);
       // The stage is holding the last reward; the strip comes back over it and
       // the next reveal rebuilds the panel around the spin already running.
@@ -3228,6 +3273,7 @@ export class Hud {
       all.className = 'btn chestopen__all';
       all.textContent = `Open all (${remaining.length})`;
       all.onclick = () => {
+        if (!this.canPayChestKey(session.tier)) return;
         session.auto = true;
         all.disabled = true;
         again.disabled = true;
@@ -3791,9 +3837,10 @@ export class Hud {
       paid += trait.score;
       // The last trait lands on the exact figure the server sent; the ones
       // before it show the share of it the grades so far have earned.
+      const gross = result.gross ?? result.gold;
       const shown = index === grades.length - 1
-        ? result.gold
-        : Math.round(result.gold * (paid / total));
+        ? gross
+        : Math.round(gross * (paid / total));
       // Quoted in dollars, the same money the range under the stone is in, so
       // the climbing figure can be read against what the tier was worth.
       panel.price.textContent = formatDollars(shown, panel.rate);
@@ -3805,8 +3852,22 @@ export class Hud {
     };
 
     const finish = () => {
-      panel.price.textContent = formatDollars(result.gold, panel.rate);
+      panel.price.textContent = formatDollars(result.gross ?? result.gold, panel.rate);
       panel.price.classList.add('appraise__price--final');
+      // The assayer's cut, as one more line on the grading sheet.
+      const sheet = panel.rows[0]?.row.parentElement;
+      if (result.fee && sheet) {
+        const row = document.createElement('div');
+        row.className = 'appraise__trait appraise__trait--graded appraise__trait--fee';
+        const label = document.createElement('dt');
+        label.textContent = 'Fee:';
+        label.title = `The assayer keeps ${Math.round((this.catalog?.appraisal?.feeRate ?? 0) * 100)}% of the price.`;
+        const value = document.createElement('dd');
+        value.className = 'appraise__grade';
+        value.textContent = `−${formatNumber(result.fee)} Gold`;
+        row.append(label, value);
+        sheet.append(row);
+      }
       panel.gembox?.classList.add('appraise__gembox--valued');
 
       // The rough stone becomes the finished gem the moment it is done being
@@ -4312,7 +4373,7 @@ export class Hud {
 
     const name = document.createElement('span');
     name.className = 'wal-account__name';
-    name.textContent = 'No wallet connected';
+    name.textContent = this.me?.nearAccountId ?? 'No wallet connected';
 
     const chevron = document.createElement('span');
     chevron.className = 'wal-account__chevron';
@@ -4392,11 +4453,10 @@ export class Hud {
    *
    * It expands in place rather than opening a sheet, because an amount is
    * something a player types while looking at the rest of their wallet -- the
-   * reference does the same for its address field. Currency and Network stay
-   * as a fixed USDG-over-a-chain picture for now (there is only one coin and
-   * no chain actually moves anything), and the amount typed here is credited
-   * straight to the wallet -- see `depositUsdg` in server/src/game/economy.js
-   * for why that is a stand-in for a payment gateway rather than one itself.
+   * reference does the same for its address field. What the button does
+   * depends on `catalog.deposits.mode`: 'chain' sends USDC on NEAR and the
+   * server credits it from the chain, 'fake' (dev only) credits it directly,
+   * 'off' disables it.
    */
   walletTransfer() {
     const box = document.createElement('div');
@@ -4417,9 +4477,11 @@ export class Hud {
 
     const grid = document.createElement('div');
     grid.className = 'wal-transfer__grid';
+    const deposits = this.catalog?.deposits ?? { mode: 'off' };
+    const onChain = deposits.mode === 'chain';
     grid.append(
-      this.walletField('Currency', this.walletSelect(['USDG'])),
-      this.walletField('Network', this.walletSelect(WALLET_NETWORKS)),
+      this.walletField('Currency', this.walletSelect([onChain ? 'USDC' : 'USDG'])),
+      this.walletField('Network', this.walletSelect(onChain ? ['NEAR'] : WALLET_NETWORKS)),
     );
 
     const amountLabel = document.createElement('div');
@@ -4443,18 +4505,48 @@ export class Hud {
         this.toast('Enter an amount to deposit.', 'warn');
         return;
       }
-      this.net.depositUsdg(Math.round(value * 100) / 100);
+      const usdg = Math.round(value * 100) / 100;
+      if (deposits.mode === 'fake') {
+        this.net.depositUsdg(usdg);
+      } else if (onChain) {
+        this.sendChainDeposit(deposits, usdg, confirm);
+      }
     });
+    confirm.disabled = deposits.mode === 'off';
 
     const hint = document.createElement('p');
     hint.className = 'wal-transfer__hint';
-    hint.textContent = 'Credited straight to your wallet -- there is no real payment '
-      + 'gateway behind this yet, so nothing is actually charged.';
+    hint.textContent = {
+      chain: 'Sends USDC from your NEAR wallet. 1 USDC = $1.00 USDG, credited once the transfer is final.',
+      fake: 'Dev mode: credited straight to your wallet. Nothing is charged.',
+      off: 'Deposits are not open yet.',
+    }[deposits.mode];
 
     box.append(head, grid, amountLabel, amount, confirm, hint);
     this.wallet.nodes.transfer = box;
     this.wallet.nodes.depositAmount = amount;
     return box;
+  }
+
+  /** Opens the wallet to send USDC, then hands the transaction hash to the server. */
+  async sendChainDeposit(deposits, usdg, button) {
+    const accountId = this.me?.nearAccountId;
+    if (!accountId) {
+      this.toast('Sign in with a NEAR wallet to deposit.', 'warn');
+      return;
+    }
+    button.disabled = true;
+    try {
+      const { sendUsdcDeposit } = await import('../net/nearWallet.js');
+      const { txHash, senderId } = await sendUsdcDeposit({ deposits, accountId, usdg });
+      this.net.claimDeposit(txHash, senderId);
+      this.toast('Transfer sent. Confirming on NEAR...', 'good');
+    } catch (error) {
+      console.error('USDC deposit failed:', error);
+      this.toast(error?.message || 'The deposit did not go through.', 'warn');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   /** Shows or hides the transfer section, and tells the button which it is. */

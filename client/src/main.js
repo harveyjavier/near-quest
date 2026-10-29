@@ -10,7 +10,9 @@ import './style.css';
 import Phaser from 'phaser';
 
 import { NAME_RULES, ROOM_NAME, SERVER_URL } from './config.js';
-import { NetClient, forgetSession, storedDisplayName, storedSessionToken } from './net/NetClient.js';
+import {
+  NetClient, forgetSession, storeSession, storedDisplayName, storedNearAccount, storedSessionToken,
+} from './net/NetClient.js';
 import { FONT_FAMILY } from './art/palette.js';
 import { Hud } from './ui/hud.js';
 import { BootScene } from './scenes/BootScene.js';
@@ -23,7 +25,12 @@ const gate = {
   start: document.getElementById('gate-start'),
   returning: document.getElementById('gate-returning'),
   forget: document.getElementById('gate-forget'),
+  wallet: document.getElementById('gate-wallet'),
+  metamask: document.getElementById('gate-metamask'),
 };
+
+/** The server refused a wallet device's token because a later sign-in rotated it. */
+const SESSION_EXPIRED = 4401;
 
 /** Same rules the server enforces, checked here only to avoid a round trip. */
 function validateName(raw) {
@@ -44,15 +51,22 @@ function validateName(raw) {
 function prepareGate() {
   const savedName = storedDisplayName();
   const hasSession = Boolean(storedSessionToken());
+  const nearAccount = storedNearAccount();
 
+  gate.wallet.textContent = nearAccount ? 'Switch NEAR account' : 'Sign in with NEAR wallet';
   if (hasSession && savedName) {
     gate.input.value = savedName;
     gate.start.textContent = `Continue as ${savedName}`;
     gate.returning.hidden = false;
-    gate.returning.textContent = 'Your progress on this device was found.';
+    gate.returning.textContent = nearAccount
+      ? `Signed in with NEAR as ${nearAccount}.`
+      : 'Your progress on this device was found.';
     gate.forget.hidden = false;
+    gate.forget.textContent = nearAccount ? 'Sign out of NEAR' : 'Not you? Start a new guest session';
   } else {
     gate.input.value = savedName ?? '';
+    gate.returning.hidden = true;
+    gate.forget.hidden = true;
   }
 
   syncStartLabel();
@@ -139,6 +153,14 @@ async function connectAndStart(displayName) {
     await net.connect(displayName);
   } catch (error) {
     console.error('Could not join the harbor:', error);
+    if (error?.code === SESSION_EXPIRED) {
+      // Signed in elsewhere since: this token is dead, so start the gate over.
+      forgetSession();
+      prepareGate();
+      gate.start.disabled = false;
+      gate.error.textContent = 'Your NEAR session has ended (it expired, or you signed in somewhere else). Sign in with your wallet again.';
+      return;
+    }
     gate.error.textContent = describeConnectionFailure(error);
     gate.start.disabled = false;
     gate.start.textContent = originalLabel;
@@ -181,13 +203,55 @@ gate.input.addEventListener('input', () => {
   syncStartLabel();
 });
 
-gate.forget.addEventListener('click', () => {
+/** Shared by both wallet buttons: `signIn` resolves with the server's session. */
+async function walletSignIn(button, signIn) {
+  button.disabled = true;
+  gate.error.textContent = '';
+  try {
+    const name = validateName(gate.input.value);
+    const guestToken = storedSessionToken();
+    let session = await signIn({ sessionToken: guestToken, displayName: name.ok ? name.name : undefined });
+
+    // The wallet already owns a different save. The server changed nothing yet,
+    // so saying no here leaves both the guest and the wallet's sessions intact.
+    if (session.switchRequired) {
+      if (!window.confirm(`${session.accountId} already has a save (${session.displayName}). Switch to it? This device's guest progress will be left behind.`)) {
+        return;
+      }
+      session = await session.confirm();
+    }
+    storeSession(session.sessionToken, session.displayName, session.accountId);
+    await connectAndStart(session.displayName);
+  } catch (error) {
+    console.error('Wallet sign-in failed:', error);
+    gate.error.textContent = error.message || 'Wallet sign-in failed.';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// Wallet code loads on first click, inside walletSignIn's error handling.
+gate.wallet.addEventListener('click', () =>
+  walletSignIn(gate.wallet, async (options) => (await import('./net/nearWallet.js')).signInWithNear(options)));
+
+gate.metamask.addEventListener('click', () =>
+  walletSignIn(gate.metamask, async (options) => (await import('./net/nearWallet.js')).signInWithMetaMask(options)));
+
+gate.forget.addEventListener('click', async () => {
+  if (storedNearAccount()) {
+    gate.forget.disabled = true;
+    try {
+      const { signOutNear } = await import('./net/nearWallet.js');
+      await signOutNear(storedSessionToken());
+    } catch (error) {
+      // The server-side revoke is best effort; signing out locally still happens.
+      console.error('Server sign-out failed:', error);
+    } finally {
+      gate.forget.disabled = false;
+    }
+  }
   forgetSession();
-  gate.input.value = '';
-  gate.start.textContent = 'Start fishing';
-  gate.returning.hidden = true;
-  gate.forget.hidden = true;
-  gate.input.focus();
+  prepareGate();
 });
 
 prepareGate();

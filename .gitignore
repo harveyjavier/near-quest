@@ -1,0 +1,26 @@
+# Dependencies -- reinstalled by `npm run install:all`
+node_modules/
+
+# Build output
+dist/
+
+# Environment -- contains credentials; only the .example files are committed
+.env
+.env.*
+!.env.example
+
+# Python / tooling scratch
+__pycache__/
+tools/_gdd_images/
+tmp/
+output/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

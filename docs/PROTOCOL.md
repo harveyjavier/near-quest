@@ -23,12 +23,90 @@ name is `harbor`. The client joins with `joinOrCreate`.
 | `GET` | `/health` | `{ status, uptimeSeconds, database, players, room, time }` |
 | `GET` | `/catalog` | The full `CLIENT_CATALOG` payload (same object sent on join) |
 | `GET` | `/` | `{ name, endpoints }` |
+| `GET` | `/auth/near/challenge` | `{ nonce, message, recipient, network }`. The nonce works once and expires after 5 minutes. |
+| `POST` | `/auth/eth` | `{ address, signature, nonce, sessionToken?, displayName?, allowSwitch? }` → same as `/auth/near` |
+| `POST` | `/auth/signout` | `{ sessionToken }` → 204 |
+| `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName?, allowSwitch? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 409 / 429 / 503 |
 
 `database` is `"mongodb"` or `"memory"`. In production it must read
 `"mongodb"` — see [OPERATIONS.md](OPERATIONS.md).
 
 `/health` deliberately does not depend on a room existing, so it answers during
 startup and while the harbour is empty. The platform health check points at it.
+
+`/auth/near` checks the NEP-413 signature, then asks NEAR RPC whether
+`publicKey` is a full-access key of `accountId`. The client joins the room with
+the `sessionToken` it gets back.
+
+`/auth/eth` is MetaMask. MetaMask can't sign NEP-413, so the client calls
+`/auth/near/challenge?address=0x…` (lowercase), which adds `ethMessage`, and
+signs that text with `personal_sign`. The server recovers the signer and
+requires it to equal `address`. The address is the player's NEAR account id: an
+eth-implicit account (NEP-518) whose wallet contract only accepts that key.
+Addresses on NEAR's banned list are refused (`BANNED_ADDRESS`).
+
+Which player you get:
+
+1. The player already bound to the wallet (`source: "existing"`).
+2. Otherwise the guest `sessionToken` sent with the request, if it is not bound
+   yet (`source: "guest"`).
+3. Otherwise a new player (`source: "new"`).
+
+One wallet has at most one player.
+
+If the wallet already has a player and `sessionToken` is a different guest
+save that isn't bound to any wallet, the server answers **409
+`{ code: "SWITCH_REQUIRED", accountId, displayName }`** and changes nothing:
+no token rotates, nobody is kicked, and the nonce is still valid. The client
+asks the player, and on yes resends the same signed body with
+`allowSwitch: true`. A nonce is only spent by a sign-in that issues a session.
+
+Each sign-in gives the player a new `sessionToken`. The old one stops working,
+and anyone seated on it is saved and kicked with code 4001. A wallet device
+joins with `walletSession: true`. If its token has been replaced, the join fails
+with code 4401 and the client asks the player to sign in again, instead of
+creating a new guest.
+
+Wallet sessions last 30 days from sign-in. After that the join also fails with
+4401. Guest sessions don't expire.
+
+`POST /auth/signout` with `{ sessionToken }` ends a wallet session: the token is
+replaced and any live seat is saved and kicked. It returns 204 whatever the
+token is, and does nothing to guest tokens, since that would lose the save.
+
+The auth endpoints allow 20 requests per IP per minute and return 429 after that.
+
+### Deposits
+
+`catalog.deposits` says how the Deposit button works:
+
+| `mode` | Meaning |
+|---|---|
+| `chain` | `NEAR_TREASURY_ACCOUNT` is set. Players send USDC on NEAR. |
+| `fake` | Dev only (`ALLOW_FAKE_DEPOSITS=true`). `deposit_usdg` credits for nothing. |
+| `off` | Neither. Both deposit messages are refused with `DEPOSITS_OFF`. |
+
+On-chain flow: the client calls `ft_transfer` on `usdcContract` with
+`receiver_id: treasury` from the player's bound wallet, then sends
+`claim_deposit { txHash, senderId? }`. `senderId` is the transaction signer,
+which for MetaMask is NEAR's relayer; it is only used to look the transaction
+up. The server reads the final transaction with `EXPERIMENTAL_tx_status` and
+sums every successful `ft_transfer` receipt on the USDC contract whose
+predecessor is the player and whose `receiver_id` is the treasury. That covers
+both wallet-signed and relayed transfers, since `ft_transfer` always spends the
+predecessor's tokens. The amount is rounded down to the cent, with no deposit
+caps. A txHash credits once.
+
+| Server answer | Meaning | Client |
+|---|---|---|
+| `deposit_claimed { txHash, status: "credited", already: false }`, then `usdg_deposited` | Credited now | Forgets the hash |
+| `deposit_claimed { txHash, status: "credited", already: true }` | Credited earlier | Forgets the hash |
+| `deposit_claimed { txHash, status: "pending", already: true }` | An earlier claim stopped before the player was paid; an operator settles it | Keeps the hash |
+| `deposit_failed { txHash, code, message, retryable: true }` | `TX_PENDING` or `NEAR_UNAVAILABLE` | Retries after 5 s, 15 s, 45 s and 2 min while connected |
+| `deposit_failed { txHash, code, message, retryable: false }` | Not a deposit to us (`TX_NOT_DEPOSIT`, `AMOUNT_INVALID`, ...) | Forgets the hash |
+
+The client keeps unconfirmed hashes in localStorage and resends them on each
+join for 7 days.
 
 `/catalog` exists so the client can render the shop and fish list before opening
 a socket, and so you can confirm from a terminal that a config change actually
@@ -44,6 +122,7 @@ Join options are sent by the client with `joinOrCreate`:
 {
   sessionToken: "<64 hex chars>",   // optional; omitted on a first visit
   displayName: "Angler"             // used only when no valid token is presented
+  walletSession: true               // optional; set by wallet devices, see /auth/near
 }
 ```
 
@@ -102,8 +181,8 @@ design. A client that wants gold has to buy, catch or appraise for it.
 | `cast_started` | `{ endsAt, ... }` | A cast entered the water |
 | `cast_result` | Catch, chest drop, XP, log entry | A cast resolved |
 | `cast_cancelled` | `{ reason, ... }` | Auto-fishing turned off mid-cast |
-| `chest_opened` | The single reward drawn | After `open_chest` |
-| `gem_appraised` | Grades, traits, gold paid | After `appraise_gem` |
+| `chest_opened` | The single reward drawn, and `keyCost` (Gold paid to open it) | After `open_chest` |
+| `gem_appraised` | Grades, traits, `gross` price, `fee` (assay fee), `gold` paid | After `appraise_gem` |
 | `rod_upgraded` | New level and rod | After `upgrade_rod` |
 | `consumable_used` | Effect applied | After `use_consumable` |
 | `fish_cashed` | XP gained, species | After `cash_out_species` |
@@ -179,6 +258,7 @@ Delivered as `error_msg` with a human-readable `message` beside the code.
 | `FISH_BAG_FULL` | Every fish slot is occupied; casting is blocked until you cash in. |
 | `SESSION_TAKEN_OVER` | The same session token joined elsewhere; this seat was evicted. |
 | `SERVER_ERROR` | Unexpected failure. Details are logged server-side only. |
+| `KEY_UNAFFORDABLE` | Not enough Gold for this chest tier's key. The chest stays in the bag. |
 
 Plus per-action failures returned by the game modules — an unavailable chest or
 gem id, insufficient gold for an upgrade or purchase, no fish of the requested

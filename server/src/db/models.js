@@ -4,7 +4,8 @@
  * NO ACCOUNTS, NO PERSONAL DATA: a player document is keyed by an opaque,
  * server-generated `sessionToken` held in the browser's localStorage. There is
  * no email, no password, no IP and no device fingerprint stored anywhere. The
- * only human-supplied field is the display name.
+ * only human-supplied field is the display name. A player who signs in with a
+ * NEAR wallet also carries its public `nearAccountId` (see auth/near.js).
  */
 
 import mongoose from 'mongoose';
@@ -103,6 +104,10 @@ export const PlayerSchema = new Schema(
   {
     sessionToken: { type: String, required: true, unique: true, index: true },
     displayName: { type: String, required: true },
+    // Set once by NEAR wallet sign-in; unique so one wallet owns one player.
+    nearAccountId: { type: String, unique: true, sparse: true },
+    // Wallet players only. Not in PERSISTED_FIELDS, so room saves never touch it.
+    sessionExpiresAt: { type: Number },
 
     rodLevel: { type: Number, default: 1, min: 1 },
     xp: { type: Number, default: 0, min: 0 },
@@ -155,6 +160,24 @@ export const ChatMessageSchema = new Schema(
   { versionKey: false },
 );
 
+/**
+ * One row per on-chain USDC deposit. The unique txHash is what stops a
+ * transaction being credited twice. `status` is 'pending' from the claim until
+ * the player save lands, then 'credited'; a row stuck on 'pending' needs a look.
+ */
+export const DepositSchema = new Schema(
+  {
+    txHash: { type: String, required: true, unique: true },
+    accountId: { type: String, required: true, index: true },
+    units: { type: String, required: true },
+    usdg: { type: Number, required: true },
+    status: { type: String, required: true },
+    at: { type: Number, default: () => Date.now() },
+  },
+  { versionKey: false },
+);
+
 export const Player = mongoose.model('Player', PlayerSchema);
+export const Deposit = mongoose.model('Deposit', DepositSchema);
 export const ChatMessage = mongoose.model('ChatMessage', ChatMessageSchema);
 export const World = mongoose.model('World', WorldSchema);

@@ -43,6 +43,16 @@
           Start fishing
         </button>
 
+        <!-- One row, so the wallet options never sit on top of the returning-player links. -->
+        <div class="gate__wallets">
+          <button id="gate-wallet" class="gate__forget" type="button">
+            Sign in with NEAR wallet
+          </button>
+          <button id="gate-metamask" class="gate__forget" type="button">
+            Sign in with MetaMask
+          </button>
+        </div>
+
         <p id="gate-returning" class="gate__returning" hidden></p>
         <button id="gate-forget" class="gate__forget" type="button" hidden>
           Not you? Start a new guest session
@@ -119,6 +129,11 @@
             title="Add USDG to your wallet"
             aria-haspopup="dialog"
           >Deposit</button>
+        </div>
+
+        <!-- The NEAR account this save is bound to; hidden for guests. -->
+        <div class="wallet" id="hud-near" aria-label="NEAR account" hidden>
+          <span class="pill" id="hud-near-account"></span>
         </div>
       </header>
 

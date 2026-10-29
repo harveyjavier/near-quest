@@ -124,7 +124,7 @@ function projectForSave(record) {
 
 /* ------------------------------------------------------------------ Mongo -- */
 
-function mongoBackend({ Player, ChatMessage, World }) {
+function mongoBackend({ Player, ChatMessage, World, Deposit }) {
   return {
     kind: 'mongodb',
 
@@ -137,6 +137,50 @@ function mongoBackend({ Player, ChatMessage, World }) {
       return record;
     },
 
+    async findPlayerByNearAccount(nearAccountId) {
+      return fromStorage(await Player.findOne({ nearAccountId }).lean().exec());
+    },
+
+    /** False when the session is unknown or already bound to another wallet. */
+    async bindNearAccount(sessionToken, nearAccountId) {
+      const result = await Player.updateOne(
+        { sessionToken, nearAccountId: { $exists: false } },
+        { $set: { nearAccountId } },
+      ).exec();
+      return result.modifiedCount === 1;
+    },
+
+    /** False when the txHash was already claimed. */
+    async insertDeposit(row) {
+      try {
+        await Deposit.create(row);
+        return true;
+      } catch (error) {
+        if (error.code === 11000) return false;
+        throw error;
+      }
+    },
+
+    async findDeposit(txHash) {
+      return Deposit.findOne({ txHash }, { _id: 0 }).lean().exec();
+    },
+
+    async setDepositStatus(txHash, status) {
+      await Deposit.updateOne({ txHash }, { $set: { status } }).exec();
+    },
+
+    async deleteDeposit(txHash) {
+      await Deposit.deleteOne({ txHash }).exec();
+    },
+
+    async rotateSessionToken(oldToken, newToken, sessionExpiresAt) {
+      const result = await Player.updateOne(
+        { sessionToken: oldToken },
+        { $set: { sessionToken: newToken, sessionExpiresAt } },
+      ).exec();
+      return result.modifiedCount === 1;
+    },
+
     async savePlayer(record) {
       await Player.updateOne(
         { sessionToken: record.sessionToken },
@@ -147,7 +191,8 @@ function mongoBackend({ Player, ChatMessage, World }) {
           // Named explicitly, and in the same round trip.
           $unset: Object.fromEntries(RETIRED_FIELDS.map((field) => [field, ''])),
         },
-        { upsert: true, strict: false },
+        // No upsert: a stale flush after a token rotation must not resurrect the old token.
+        { strict: false },
       ).exec();
     },
 
@@ -208,6 +253,7 @@ function mongoBackend({ Player, ChatMessage, World }) {
 
 function memoryBackend() {
   const players = new Map();
+  const deposits = new Map();
   const chat = [];
   let world = null;
 
@@ -224,8 +270,52 @@ function memoryBackend() {
       return record;
     },
 
+    async findPlayerByNearAccount(nearAccountId) {
+      const found = [...players.values()].find((player) => player.nearAccountId === nearAccountId);
+      return found ? fromStorage(structuredClone(found)) : null;
+    },
+
+    async bindNearAccount(sessionToken, nearAccountId) {
+      const found = players.get(sessionToken);
+      if (!found || found.nearAccountId) return false;
+      found.nearAccountId = nearAccountId;
+      return true;
+    },
+
+    async insertDeposit(row) {
+      if (deposits.has(row.txHash)) return false;
+      deposits.set(row.txHash, { ...row });
+      return true;
+    },
+
+    async findDeposit(txHash) {
+      const row = deposits.get(txHash);
+      return row ? { ...row } : null;
+    },
+
+    async setDepositStatus(txHash, status) {
+      const row = deposits.get(txHash);
+      if (row) row.status = status;
+    },
+
+    async deleteDeposit(txHash) {
+      deposits.delete(txHash);
+    },
+
+    async rotateSessionToken(oldToken, newToken, sessionExpiresAt) {
+      const found = players.get(oldToken);
+      if (!found) return false;
+      players.delete(oldToken);
+      players.set(newToken, { ...found, sessionToken: newToken, sessionExpiresAt });
+      return true;
+    },
+
     async savePlayer(record) {
+      if (!players.has(record.sessionToken)) return;
       players.set(record.sessionToken, structuredClone({
+        // Keeps the auth fields, which the room never writes back.
+        nearAccountId: players.get(record.sessionToken)?.nearAccountId,
+        sessionExpiresAt: players.get(record.sessionToken)?.sessionExpiresAt,
         sessionToken: record.sessionToken,
         ...projectForSave(record),
       }));

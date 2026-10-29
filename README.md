@@ -63,10 +63,11 @@ variable.
 |---|---|
 | `npm run install:all` | Install both workspaces |
 | `npm run dev:server` / `npm run dev:client` | Development servers |
-| `npm test` | Server suite (107 tests) + client unit tests |
+| `npm test` | Server suite (142 tests) + client unit tests |
 | `npm run build` | Production client build into `client/dist` |
 | `npm run verify` | `npm test` then `npm run build` — what CI runs |
 | `npm run smoke` | End-to-end test against a running server |
+| `npm --prefix client run test:ui` | Browser test: wallet sign-in, deposit panel, chest keys, assay fee (needs Chromium) |
 | `npm run balance` | Print the current balance tables |
 | `npm run seed` | Create indexes and welcome chat (needs `MONGO_URL`) |
 

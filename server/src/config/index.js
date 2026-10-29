@@ -17,12 +17,17 @@ export * from './rods.config.js';
 export * from './rewards.config.js';
 export * from './economy.config.js';
 export * from './game.config.js';
+export * from './near.config.js';
+
+import { DEPOSITS } from './near.config.js';
 
 import { FISH, RARITY_TIERS } from './fish.config.js';
 import { RODS, MAX_ROD_LEVEL } from './rods.config.js';
 import {
   APPRAISAL_GRADES,
   APPRAISAL_TRAITS,
+  ASSAY_FEE_RATE,
+  CHEST_KEY_COST,
   CHEST_TIERS,
   CONSUMABLE_EFFECTS,
   GEM_TIERS,
@@ -56,6 +61,8 @@ import {
  * level or a stake is per-player and rides on `meView` instead.
  */
 export const CLIENT_CATALOG = Object.freeze({
+  // How the Deposit button works: on-chain USDC, the dev-only fake, or off.
+  deposits: DEPOSITS,
   fish: FISH.map(({ id, name, tier, rarityIndex, color, unlockLevel, baseXp }) => ({
     id, name, tier, rarityIndex, color, unlockLevel, baseXp,
   })),
@@ -80,6 +87,8 @@ export const CLIENT_CATALOG = Object.freeze({
     name,
     color,
     contents: chestContentOdds(rewardTable),
+    // Gold to open one (its key); 0 for tiers that open free.
+    keyCost: CHEST_KEY_COST[id] ?? 0,
   })),
   // The Gold range travels with the tier so the appraisal panel can state what
   // is at stake before the grades land. A range is not a probability: it says
@@ -93,6 +102,7 @@ export const CLIENT_CATALOG = Object.freeze({
   // Trait order and the grade ladder, so the panel can lay out its rows and
   // colour a grade without hard-coding either against the server's config.
   appraisal: {
+    feeRate: ASSAY_FEE_RATE,
     traits: APPRAISAL_TRAITS,
     grades: APPRAISAL_GRADES.map(({ id, color }) => ({ id, color })),
   },

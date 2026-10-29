@@ -8,7 +8,7 @@
  * a probability -- if one did, this file would ignore it.
  */
 
-import { Room } from '@colyseus/core';
+import { Room, ServerError } from '@colyseus/core';
 
 import {
   AUTO_FISHING,
@@ -17,6 +17,7 @@ import {
   CLIENT_CATALOG,
   CONNECTION,
   CURRENCIES_BY_ID,
+  DEPOSITS,
   EMISSION_MONITOR,
   LEADERBOARD,
   MAX_CLIENTS_PER_ROOM,
@@ -28,7 +29,7 @@ import {
 } from '../config/index.js';
 import { openChest, appraiseGem, useConsumable } from '../game/chests.js';
 import {
-  applyBaitRegen, buyGoldWithUsdg, createBaitStock, depositUsdg, purchase, returnBaitToStock,
+  applyBaitRegen, buyGoldWithUsdg, createBaitStock, creditUsdg, depositUsdg, purchase, returnBaitToStock,
 } from '../game/economy.js';
 import {
   activeBuffs,
@@ -54,6 +55,8 @@ import { createPlayerRecord, getRepo, WORLD_KEY } from '../db/repo.js';
 import { HarborState, ChatEntry, LeaderEntry, PlayerState } from './schema/HarborState.js';
 import { catchLogView, meView } from './views.js';
 import { log } from '../util/logger.js';
+import { validateTxHash, verifyUsdcDeposit } from '../payments/usdc.js';
+import { isValidAccountId } from '../auth/near.js';
 import {
   ValidationError,
   asObject,
@@ -74,6 +77,22 @@ import {
 
 /** How long a dropped client keeps its dock slot before being cleaned up. */
 const RECONNECT_GRACE_SECONDS = CONNECTION.reconnectGraceSeconds;
+
+/** Deposit check failures worth retrying: the chain or RPC may just be slow. */
+const RETRYABLE_DEPOSIT_CODES = new Set(['TX_PENDING', 'NEAR_UNAVAILABLE']);
+
+/** Join rejection for a wallet device whose token was rotated by a later sign-in. */
+export const SESSION_EXPIRED = 4401;
+
+const liveRooms = new Set();
+
+/**
+ * Saves and evicts whoever is seated on `sessionToken`, in every room in this
+ * process. Called by wallet sign-in before it rotates that token.
+ */
+export async function releaseSession(sessionToken) {
+  await Promise.all([...liveRooms].map((room) => room.releaseSession(sessionToken)));
+}
 
 export class HarborRoom extends Room {
   constructor(...args) {
@@ -118,6 +137,7 @@ export class HarborRoom extends Room {
   async onCreate() {
     this.state = new HarborState();
     this.autoDispose = false; // the harbor is a persistent world, not a match
+    liveRooms.add(this);
 
     await this.loadBaitStock();
     await this.loadEmissionTotals();
@@ -153,6 +173,16 @@ export class HarborRoom extends Room {
     // Returning device: look the guest session up by its opaque token.
     if (isValidSessionToken(requested.sessionToken)) {
       record = await repo.findPlayerByToken(requested.sessionToken);
+    }
+
+    // A wallet device must never silently fall back to a fresh guest, and a
+    // wallet save needs a fresh signature once its session runs out. Expiry is
+    // only checked here, at join: a session that expires mid-play runs on
+    // until the player leaves and joins again. A reconnect inside the grace
+    // window skips this check too, since it never runs onJoin.
+    const walletExpired = record?.nearAccountId && !(record.sessionExpiresAt > Date.now());
+    if (walletExpired || (!record && requested.walletSession === true)) {
+      throw new ServerError(SESSION_EXPIRED, 'Your wallet session has expired. Please sign in again.');
     }
 
     if (!record) {
@@ -240,6 +270,7 @@ export class HarborRoom extends Room {
   }
 
   async onDispose() {
+    liveRooms.delete(this);
     // Close the open emission window before the last save, or a shutdown
     // silently drops whatever the harbour minted since the previous flush.
     if (EMISSION_MONITOR.enabled) this.flushEmission();
@@ -302,7 +333,10 @@ export class HarborRoom extends Room {
       const result = openChest(runtime.record, chestId);
 
       if (!result.ok) {
-        client.send('error_msg', { code: result.code, message: 'That chest is no longer available.' });
+        const message = result.code === 'KEY_UNAFFORDABLE'
+          ? `Opening this chest costs ${result.cost} Gold.`
+          : 'That chest is no longer available.';
+        client.send('error_msg', { code: result.code, message });
         return;
       }
 
@@ -426,13 +460,13 @@ export class HarborRoom extends Room {
     });
 
     /**
-     * Credits USDG straight to the wallet.
-     *
-     * There is no payment backend behind this yet -- see `depositUsdg`'s own
-     * note in game/economy.js -- so this is the "simulated deposit" the wallet
-     * panel already described as coming, bounded by USDG_LIMITS.
+     * The fake deposit: credits USDG for nothing. Only when DEPOSITS.mode is
+     * 'fake' (ALLOW_FAKE_DEPOSITS=true and no treasury), i.e. local dev.
      */
     this.handle('deposit_usdg', (client, runtime, payload) => {
+      if (DEPOSITS.mode !== 'fake') {
+        throw new ValidationError('DEPOSITS_OFF', 'Use a NEAR wallet to deposit USDC.');
+      }
       const amount = validateUsdgAmount(payload.amount);
       const result = depositUsdg(runtime.record, amount);
 
@@ -443,6 +477,62 @@ export class HarborRoom extends Room {
 
       runtime.dirty = true;
       client.send('usdg_deposited', result);
+      this.sendMe(client, runtime);
+    });
+
+    /**
+     * Credits a USDC transfer the player already sent to the treasury. The
+     * amount comes from the chain, never the client. See payments/usdc.js.
+     */
+    this.handle('claim_deposit', async (client, runtime, payload) => {
+      if (DEPOSITS.mode !== 'chain') throw new ValidationError('DEPOSITS_OFF', 'Deposits are not open yet.');
+      const accountId = runtime.record.nearAccountId;
+      if (!accountId) throw new ValidationError('WALLET_REQUIRED', 'Sign in with a NEAR wallet to deposit.');
+      const txHash = validateTxHash(payload.txHash);
+      // Only used to find the transaction; the checks are on the receipts.
+      const senderId = payload.senderId === undefined ? accountId : payload.senderId;
+      if (!isValidAccountId(senderId)) throw new ValidationError('BAD_TX', 'Invalid transaction sender.');
+
+      let verified;
+      try {
+        verified = await verifyUsdcDeposit({ txHash, accountId, senderId });
+      } catch (error) {
+        if (!(error instanceof ValidationError)) throw error;
+        // Tied to the hash so the client knows which saved deposit to retry or drop.
+        client.send('deposit_failed', {
+          txHash, code: error.code, message: error.message, retryable: RETRYABLE_DEPOSIT_CODES.has(error.code),
+        });
+        return;
+      }
+      const { units, usdg } = verified;
+      const repo = getRepo();
+      if (!await repo.insertDeposit({ txHash, accountId, units, usdg, status: 'pending', at: Date.now() })) {
+        // 'credited', or 'pending' if an earlier claim stopped before the save:
+        // the client keeps a pending hash, and an operator settles the row.
+        const row = await repo.findDeposit(txHash);
+        client.send('deposit_claimed', { txHash, status: row?.status ?? 'pending', already: true });
+        return;
+      }
+      // The player may have left while RPC was answering. Free the claim so the
+      // client's saved hash credits it on the next join.
+      if (this.runtime.get(client.sessionId) !== runtime) {
+        await repo.deleteDeposit(txHash);
+        return;
+      }
+
+      creditUsdg(runtime.record, usdg);
+      runtime.dirty = true;
+      try {
+        await this.persist(runtime);
+        await repo.setDepositStatus(txHash, 'credited');
+      } catch (error) {
+        // Credited in memory; the next flush retries the save. Row stays 'pending'.
+        runtime.dirty = true;
+        log.error(`Deposit ${txHash} credited but not saved yet:`, error.message);
+      }
+      log.info(`Deposit ${txHash}: $${usdg} USDC from ${accountId}.`);
+      client.send('deposit_claimed', { txHash, status: 'credited', already: false });
+      client.send('usdg_deposited', { ok: true, deposited: usdg, usdg: runtime.record.usdg });
       this.sendMe(client, runtime);
     });
 
@@ -917,6 +1007,19 @@ export class HarborRoom extends Room {
       this.clientBySessionId(sessionId)?.leave(4001);
       this.runtime.delete(sessionId);
       this.state.players.delete(sessionId);
+    }
+  }
+
+  async releaseSession(sessionToken) {
+    for (const [sessionId, runtime] of this.runtime) {
+      if (runtime.record.sessionToken !== sessionToken) continue;
+      // Out of the map before the await, so no periodic flush races the rotation.
+      this.runtime.delete(sessionId);
+      this.state.players.delete(sessionId);
+      this.state.onlineCount = this.state.players.size;
+      this.clientBySessionId(sessionId)?.leave(4001);
+      runtime.dirty = true;
+      await this.persist(runtime);
     }
   }
 

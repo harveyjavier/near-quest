@@ -133,10 +133,11 @@ Run from the repository root.
 | `npm run install:all` | Install both workspaces. |
 | `npm run dev:server` | Server with `--watch`. |
 | `npm run dev:client` | Vite dev server. |
-| `npm test` | Server suite (107 tests) + client unit tests. |
+| `npm test` | Server suite (142 tests) + client unit tests. |
 | `npm run build` | Production client build into `client/dist`. |
 | `npm run verify` | `npm test` then `npm run build`. What CI runs. |
 | `npm run smoke` | End-to-end test against a running server. |
+| `npm --prefix client run test:ui` | Browser test of wallet sign-in and the deposit panel. Needs Chromium. |
 | `npm run balance` | Print the current balance tables. |
 | `npm run seed` | Create indexes and welcome chat. Needs `MONGO_URL`. |
 
@@ -148,7 +149,7 @@ Three layers, and they cover different failure modes.
 
 ### Unit and integration — `npm test`
 
-`server/test/game.test.js` (107 assertions across 18 suites) exercises the game
+`server/test/game.test.js` exercises the game
 modules directly: catch and chest rolls at every rod and stake, chest reward
 tables, gem appraisal, purchases and stock, progression and upgrade costs, bag
 caps and their overflow behaviour, and validation of every message payload
@@ -159,8 +160,30 @@ balance model, including that a deliberate over-minting exploit trips the wire.
 
 `client/test/level.test.js` checks the collision grid and pathfinding.
 
+`server/test/nearAuth.test.js` and `server/test/usdcDeposit.test.js` cover
+wallet sign-in (NEAR and MetaMask signatures, replay, expiry, sign-out, token
+rotation) and deposit verification against hand-built RPC results.
+
 These need no database and no running server. They are fast, and they are what
 you run on every change.
+
+### Browser — `npm --prefix client run test:ui`
+
+Starts its own server (memory store, every env var pinned so `server/.env` is
+ignored) and Vite, then drives headless Chromium through `playwright-core`.
+MetaMask is a stub `window.ethereum` that signs with a throwaway key, so the
+server checks a real signature. It covers: both sign-in buttons, MetaMask
+sign-in, the account chip, the deposit panel when deposits are off, sign-out,
+and the expired-session message.
+
+It uses the system Chromium (`/usr/bin/chromium`, or set `CHROME_PATH`) and
+downloads no browser. Without one the suite is skipped locally, and fails when
+`CI` is set, so a CI run can't pass by not running it.
+
+`server/test/fixtures/testnet-usdc-ft_transfer.json` is a real
+`EXPERIMENTAL_tx_status` response for a relayed USDC transfer on testnet,
+captured from the archival RPC. It pins the response shape the deposit check
+reads.
 
 ### End-to-end — `npm run smoke`
 

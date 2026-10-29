@@ -26,6 +26,7 @@ export function meView(record, runtime = {}) {
 
   return {
     displayName: record.displayName,
+    nearAccountId: record.nearAccountId ?? null,
 
     rodLevel: record.rodLevel,
     rodName: rod.name,

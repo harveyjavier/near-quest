@@ -16,7 +16,34 @@ import { Client, getStateCallbacks } from '@colyseus/sdk';
 const STORAGE_KEYS = {
   sessionToken: 'fishing-idle.sessionToken',
   displayName: 'fishing-idle.displayName',
+  nearAccountId: 'fishing-idle.nearAccountId',
+  pendingDeposits: 'fishing-idle.pendingDeposits',
 };
+
+/** A sent transfer the server hasn't confirmed is retried on each join for this long. */
+const PENDING_DEPOSIT_TTL_MS = 7 * 24 * 60 * 60_000;
+
+/** While connected, a slow chain or RPC is retried after these waits; then the next join tries again. */
+const DEPOSIT_RETRY_DELAYS_MS = [5_000, 15_000, 45_000, 120_000];
+
+function forgetPendingDeposit(txHash) {
+  const pending = readPendingDeposits();
+  delete pending[txHash];
+  writePendingDeposits(pending);
+}
+
+/** txHash -> { sentAt, accountId, senderId }, for transfers already on-chain but not yet credited. */
+function readPendingDeposits() {
+  try {
+    return JSON.parse(readStorage(STORAGE_KEYS.pendingDeposits) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writePendingDeposits(pending) {
+  writeStorage(STORAGE_KEYS.pendingDeposits, JSON.stringify(pending));
+}
 
 /** How often the client asks the room to prove it is still there. */
 const HEARTBEAT_MS = 10_000;
@@ -59,11 +86,23 @@ export function storedSessionToken() {
   return readStorage(STORAGE_KEYS.sessionToken);
 }
 
+export function storedNearAccount() {
+  return readStorage(STORAGE_KEYS.nearAccountId);
+}
+
+/** Adopts a session issued by wallet sign-in. */
+export function storeSession(sessionToken, displayName, nearAccountId) {
+  writeStorage(STORAGE_KEYS.sessionToken, sessionToken);
+  writeStorage(STORAGE_KEYS.displayName, displayName);
+  writeStorage(STORAGE_KEYS.nearAccountId, nearAccountId);
+}
+
 /** Clears the guest session. Used by the "start over" affordance. */
 export function forgetSession() {
   try {
     window.localStorage.removeItem(STORAGE_KEYS.sessionToken);
     window.localStorage.removeItem(STORAGE_KEYS.displayName);
+    window.localStorage.removeItem(STORAGE_KEYS.nearAccountId);
   } catch {
     // Nothing to do -- storage was unavailable, so nothing was stored.
   }
@@ -128,6 +167,8 @@ export class NetClient {
     const options = {};
     if (sessionToken) options.sessionToken = sessionToken;
     if (displayName) options.displayName = displayName;
+    // Tells the server to refuse rather than mint a fresh guest if the token was rotated away.
+    if (sessionToken && storedNearAccount()) options.walletSession = true;
 
     this.room = await client.joinOrCreate(this.roomName, options);
     this.$ = getStateCallbacks(this.room);
@@ -159,6 +200,7 @@ export class NetClient {
     });
 
     room.onMessage('me', (me) => {
+      if (!this.me && me.nearAccountId) this.retryPendingDeposits(me.nearAccountId);
       this.me = me;
       this.emit('me', me);
     });
@@ -177,6 +219,17 @@ export class NetClient {
     room.onMessage('rod_upgraded', (payload) => this.emit('rodUpgraded', payload));
     room.onMessage('purchased', (payload) => this.emit('purchased', payload));
     room.onMessage('usdg_deposited', (payload) => this.emit('usdgDeposited', payload));
+    room.onMessage('deposit_claimed', ({ txHash, status, already }) => {
+      // A 'pending' row means an earlier claim stopped before the player was
+      // paid: keep the hash, the player has not been credited yet.
+      if (status === 'credited') forgetPendingDeposit(txHash);
+      this.emit('depositClaimed', { txHash, status, already });
+    });
+    room.onMessage('deposit_failed', (failure) => {
+      if (failure.retryable) this.scheduleDepositRetry(failure.txHash);
+      else forgetPendingDeposit(failure.txHash);
+      this.emit('depositFailed', failure);
+    });
     room.onMessage('gold_bought', (payload) => this.emit('goldBought', payload));
     room.onMessage('consumable_used', (payload) => this.emit('consumableUsed', payload));
     room.onMessage('catch_log', (payload) => this.emit('catchLog', payload));
@@ -344,6 +397,39 @@ export class NetClient {
   buy(itemId, quantity = 1) { this.send('buy', { itemId, quantity }); }
   /** Credits USDG to the wallet. See `depositUsdg` in server/src/game/economy.js. */
   depositUsdg(amount) { this.send('deposit_usdg', { amount }); }
+
+  /**
+   * Asks the server to credit an on-chain USDC transfer. The hash is kept
+   * until the server confirms, so a dropped tab or RPC hiccup is retried.
+   */
+  claimDeposit(txHash, senderId) {
+    const accountId = this.me?.nearAccountId;
+    writePendingDeposits({ ...readPendingDeposits(), [txHash]: { sentAt: Date.now(), accountId, senderId } });
+    this.send('claim_deposit', { txHash, senderId });
+  }
+
+  /** Backs off through DEPOSIT_RETRY_DELAYS_MS, only while this room is live. */
+  scheduleDepositRetry(txHash) {
+    this.depositRetries ??= new Map();
+    const attempt = this.depositRetries.get(txHash) ?? 0;
+    const delay = DEPOSIT_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return;
+    this.depositRetries.set(txHash, attempt + 1);
+    setTimeout(() => {
+      const entry = readPendingDeposits()[txHash];
+      if (!this.ended && this.room && entry) this.send('claim_deposit', { txHash, senderId: entry.senderId });
+    }, delay);
+  }
+
+  retryPendingDeposits(accountId) {
+    const now = Date.now();
+    const pending = readPendingDeposits();
+    for (const [txHash, entry] of Object.entries(pending)) {
+      if (!(now - entry?.sentAt <= PENDING_DEPOSIT_TTL_MS)) delete pending[txHash];
+      else if (entry.accountId === accountId) this.send('claim_deposit', { txHash, senderId: entry.senderId });
+    }
+    writePendingDeposits(pending);
+  }
   /** Converts USDG into Gold at the locked GOLD_DOLLAR_RATE anchor. */
   buyGold(gold) { this.send('buy_gold', { gold }); }
   chat(text) { this.send('chat', { text }); }
