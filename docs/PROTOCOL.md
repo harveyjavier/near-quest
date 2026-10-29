@@ -68,6 +68,33 @@ token is, and does nothing to guest tokens, since that would lose the save.
 
 The auth endpoints allow 20 requests per IP per minute and return 429 after that.
 
+### Deposits
+
+`catalog.deposits` says how the Deposit button works:
+
+| `mode` | Meaning |
+|---|---|
+| `chain` | `NEAR_TREASURY_ACCOUNT` is set. Players send USDC on NEAR. |
+| `fake` | Dev only (`ALLOW_FAKE_DEPOSITS=true`). `deposit_usdg` credits for nothing. |
+| `off` | Neither. Both deposit messages are refused with `DEPOSITS_OFF`. |
+
+On-chain flow: the client calls `ft_transfer` on `usdcContract` with
+`receiver_id: treasury` from the player's bound wallet, then sends
+`claim_deposit { txHash }`. The server reads the final transaction from RPC,
+checks signer, contract, method, receiver and success, and credits the amount
+the chain shows (rounded down to the cent, no deposit caps). A txHash credits once.
+
+| Server answer | Meaning | Client |
+|---|---|---|
+| `deposit_claimed { txHash, status: "credited", already: false }`, then `usdg_deposited` | Credited now | Forgets the hash |
+| `deposit_claimed { txHash, status: "credited", already: true }` | Credited earlier | Forgets the hash |
+| `deposit_claimed { txHash, status: "pending", already: true }` | An earlier claim stopped before the player was paid; an operator settles it | Keeps the hash |
+| `deposit_failed { txHash, code, message, retryable: true }` | `TX_PENDING` or `NEAR_UNAVAILABLE` | Retries after 5 s, 15 s, 45 s and 2 min while connected |
+| `deposit_failed { txHash, code, message, retryable: false }` | Not a deposit to us (`TX_NOT_USDC`, `AMOUNT_INVALID`, ...) | Forgets the hash |
+
+The client keeps unconfirmed hashes in localStorage and resends them on each
+join for 7 days.
+
 `/catalog` exists so the client can render the shop and fish list before opening
 a socket, and so you can confirm from a terminal that a config change actually
 shipped.

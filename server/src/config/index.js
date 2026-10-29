@@ -17,6 +17,9 @@ export * from './rods.config.js';
 export * from './rewards.config.js';
 export * from './economy.config.js';
 export * from './game.config.js';
+export * from './near.config.js';
+
+import { DEPOSITS } from './near.config.js';
 
 import { FISH, RARITY_TIERS } from './fish.config.js';
 import { RODS, MAX_ROD_LEVEL } from './rods.config.js';
@@ -56,6 +59,8 @@ import {
  * level or a stake is per-player and rides on `meView` instead.
  */
 export const CLIENT_CATALOG = Object.freeze({
+  // How the Deposit button works: on-chain USDC, the dev-only fake, or off.
+  deposits: DEPOSITS,
   fish: FISH.map(({ id, name, tier, rarityIndex, color, unlockLevel, baseXp }) => ({
     id, name, tier, rarityIndex, color, unlockLevel, baseXp,
   })),

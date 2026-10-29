@@ -118,6 +118,26 @@ overwrite each other. See
 
 ---
 
+## `deposits`
+
+One row per on-chain USDC deposit claimed through `claim_deposit`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `txHash` | String | Unique. What stops one transfer being credited twice. |
+| `accountId` | String | Indexed. The NEAR account that sent it. |
+| `units` | String | Raw USDC amount (6 decimals) from the transaction. |
+| `usdg` | Number | Dollars credited, rounded down to the cent. |
+| `status` | String | `pending` while the player save is in flight, then `credited`. |
+| `at` | Number | Epoch ms. |
+
+A row left on `pending` means the server stopped between claiming the hash and
+saving the player. Compare it with the player's `usdg` and the chain before
+fixing it by hand. Never delete `credited` rows: they are the only record of
+what was paid in.
+
+---
+
 ## Indexes
 
 Created by `npm run seed`, or by Mongoose on first connect.
@@ -128,6 +148,9 @@ Created by `npm run seed`, or by Mongoose on first connect.
 | `players` | `{ rodLevel: -1, totalCatches: -1 }` | Leaderboard refresh, every 10 s. |
 | `chatmessages` | `{ at: 1 }` | Loading recent history on room creation. |
 | `worlds` | `{ key: 1 }` unique | Single-document lookup. |
+| `players` | `{ nearAccountId: 1 }` unique, sparse | Wallet sign-in lookup; one player per wallet. |
+| `deposits` | `{ txHash: 1 }` unique | Stops double credit. |
+| `deposits` | `{ accountId: 1 }` | Looking up a player's deposits. |
 
 The leaderboard index is the one that matters as the collection grows; without
 it the 10-second refresh turns into a collection scan.

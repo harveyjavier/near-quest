@@ -29,11 +29,18 @@ Set in Railway (or Heroku) under **Variables**. Locally, copy
 | `CORS_ORIGIN` | **in production** | *(unset — allows any origin)* | Comma-separated exact browser origins, scheme included. Leave unset only in development. |
 | `PORT` | no | `2567` | **Do not set this on Railway or Heroku.** They inject it; setting it yourself breaks the health check. |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error`. |
+| `NODE_ENV` | **in production** | *(unset)* | `production` on any public deploy. Among other things it hard-disables fake deposits. Railway's Node builder sets it; check that it did. |
 | `TRUST_PROXY` | **on Railway/Heroku** | *(unset — off)* | Number of proxies in front of the server: `1` on Railway or Heroku. Leave unset when nothing sits in front, because `X-Forwarded-For` is then whatever the client sends, and trusting it lets anyone dodge the sign-in rate limit. |
+| `NEAR_NETWORK` | no | `testnet` | `testnet` or `mainnet`. The client follows the server. |
+| `NEAR_RPC_URL` | no | `https://rpc.<network>.near.org` | Used for sign-in key checks and deposit lookups. |
+| `NEAR_AUTH_RECIPIENT` | no | `robins-club` | Shown in the wallet's sign-in prompt and part of every signature. |
+| `NEAR_TREASURY_ACCOUNT` | to take deposits | *(unset)* | Turns on USDC deposits. Must be registered for storage on the USDC contract. |
+| `NEAR_USDC_CONTRACT` | no | Circle USDC for the network | Override only for a test token. |
+| `ALLOW_FAKE_DEPOSITS` | no | *(unset)* | `true` lets the Deposit button credit USDG for nothing. Dev only: ignored when a treasury is set, and refused when `NODE_ENV=production`. |
 
-Nothing else is read from the environment. There are no feature flags, no
-secrets beyond `MONGO_URL`, and no per-deployment balance overrides — that is
-deliberate, so that two deployments of the same commit play identically.
+Nothing else is read from the environment. There are no secrets beyond
+`MONGO_URL`, and no per-deployment balance overrides, so two deployments of the
+same commit play identically.
 
 ### `ALLOW_MEMORY_DB` is the one that bites
 

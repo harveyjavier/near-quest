@@ -225,6 +225,15 @@ export function depositUsdg(player, amount) {
 }
 
 /**
+ * Credits a verified on-chain deposit. No limits: the money has already moved,
+ * so refusing it here would only strand it.
+ */
+export function creditUsdg(player, amount) {
+  player.usdg = round2((player.usdg ?? 0) + amount);
+  return player.usdg;
+}
+
+/**
  * Converts USDG into Gold at the locked `GOLD_DOLLAR_RATE` anchor -- the same
  * rate the gem appraiser already quotes against, so a dollar buys the same
  * Gold however it entered the wallet.
