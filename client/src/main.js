@@ -26,6 +26,7 @@ const gate = {
   returning: document.getElementById('gate-returning'),
   forget: document.getElementById('gate-forget'),
   wallet: document.getElementById('gate-wallet'),
+  metamask: document.getElementById('gate-metamask'),
 };
 
 /** The server refused a wallet device's token because a later sign-in rotated it. */
@@ -202,14 +203,14 @@ gate.input.addEventListener('input', () => {
   syncStartLabel();
 });
 
-gate.wallet.addEventListener('click', async () => {
-  gate.wallet.disabled = true;
+/** Shared by both wallet buttons: `signIn` resolves with the server's session. */
+async function walletSignIn(button, signIn) {
+  button.disabled = true;
   gate.error.textContent = '';
   try {
-    const { signInWithNear } = await import('./net/nearWallet.js');
     const name = validateName(gate.input.value);
     const guestToken = storedSessionToken();
-    let session = await signInWithNear({ sessionToken: guestToken, displayName: name.ok ? name.name : undefined });
+    let session = await signIn({ sessionToken: guestToken, displayName: name.ok ? name.name : undefined });
 
     // The wallet already owns a different save. The server changed nothing yet,
     // so saying no here leaves both the guest and the wallet's sessions intact.
@@ -222,12 +223,19 @@ gate.wallet.addEventListener('click', async () => {
     storeSession(session.sessionToken, session.displayName, session.accountId);
     await connectAndStart(session.displayName);
   } catch (error) {
-    console.error('NEAR sign-in failed:', error);
+    console.error('Wallet sign-in failed:', error);
     gate.error.textContent = error.message || 'Wallet sign-in failed.';
   } finally {
-    gate.wallet.disabled = false;
+    button.disabled = false;
   }
-});
+}
+
+// Wallet code loads on first click, inside walletSignIn's error handling.
+gate.wallet.addEventListener('click', () =>
+  walletSignIn(gate.wallet, async (options) => (await import('./net/nearWallet.js')).signInWithNear(options)));
+
+gate.metamask.addEventListener('click', () =>
+  walletSignIn(gate.metamask, async (options) => (await import('./net/nearWallet.js')).signInWithMetaMask(options)));
 
 gate.forget.addEventListener('click', async () => {
   if (storedNearAccount()) {

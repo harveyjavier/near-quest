@@ -4346,6 +4346,29 @@ input:focus-visible {
   color: #1f4f36;
 }
 
+/* The wallet sign-in links: one row under the returning-player note, with
+   "Not you?" moved below it. Positioned like the rest of the card, as a
+   percentage of the signboard art. */
+.gate__wallets {
+  position: absolute;
+  top: 61%;
+  left: 58.33%;
+  width: 24%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 1em;
+}
+
+.gate__wallets .gate__forget {
+  position: static;
+  width: auto;
+}
+
+#gate-forget {
+  top: 63.6%;
+}
+
 
 /* ---- wallet chips ------------------------------------------------------
    The wallet used to be one walnut panel with three small brown pills inside

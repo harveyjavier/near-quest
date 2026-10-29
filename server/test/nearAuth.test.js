@@ -7,9 +7,11 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { before, describe, it } from 'node:test';
 
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+
 import {
   SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, WALLET_SESSION_TTL_MS, assertAuthRate, issueNonce, nep413Hash, signInWithNear,
-  signOutNear, verifyNearSignIn,
+  ethSignInMessage, signInWithEthereum, signOutNear, verifyEthSignIn, verifyNearSignIn,
 } from '../src/auth/near.js';
 import { connectDatabase, createPlayerRecord, getRepo } from '../src/db/repo.js';
 
@@ -65,6 +67,32 @@ describe('verifyNearSignIn', () => {
   });
 });
 
+const ethAccount = privateKeyToAccount(generatePrivateKey());
+const ETH_ADDRESS = ethAccount.address.toLowerCase();
+
+async function ethBody(address = ETH_ADDRESS, signer = ethAccount) {
+  const nonce = issueNonce();
+  const signature = await signer.signMessage({ message: ethSignInMessage({ address, nonce }) });
+  return { address, nonce, signature };
+}
+
+describe('verifyEthSignIn', () => {
+  it('accepts a personal_sign from the address it names', async () => {
+    assert.equal(await verifyEthSignIn(await ethBody()), ETH_ADDRESS);
+  });
+
+  it('rejects a signature from a different key', async () => {
+    const other = privateKeyToAccount(generatePrivateKey());
+    await assert.rejects(verifyEthSignIn(await ethBody(ETH_ADDRESS, other)), { code: 'BAD_SIGNATURE' });
+  });
+
+  it('rejects mixed-case and banned addresses', async () => {
+    await assert.rejects(verifyEthSignIn({ ...(await ethBody()), address: ethAccount.address }), { code: 'BAD_ACCOUNT' });
+    const banned = '0x0048501436e6325eff9756d804160dce4aaf3f3f';
+    await assert.rejects(verifyEthSignIn(await ethBody(banned)), { code: 'BANNED_ADDRESS' });
+  });
+});
+
 describe('assertAuthRate', () => {
   it('allows 20 requests per IP per minute', () => {
     for (let i = 0; i < 20; i += 1) assertAuthRate('203.0.113.9', 1000);
@@ -111,10 +139,37 @@ describe('signInWithNear', () => {
     assert.equal((await getRepo().findPlayerByNearAccount('bob.testnet')).sessionToken, owned.sessionToken);
   });
 
+  it('sign-out kills a wallet token but never a guest token', async () => {
+    const { sessionToken } = await signInWithNear(signedBody('dave.testnet'), fullAccess);
+    const released = [];
+    await signOutNear(sessionToken, { releaseSession: async (t) => { released.push(t); } });
+    assert.deepEqual(released, [sessionToken]);
+    assert.equal(await getRepo().findPlayerByToken(sessionToken), null);
+    assert.equal((await getRepo().findPlayerByNearAccount('dave.testnet')).sessionExpiresAt, 0);
+
+    const guest = createPlayerRecord('Stays');
+    await getRepo().insertPlayer(guest);
+    await signOutNear(guest.sessionToken);
+    assert.ok(await getRepo().findPlayerByToken(guest.sessionToken));
+  });
+
+  it('MetaMask sign-in binds the eth-implicit account like any wallet', async () => {
+    const guest = createPlayerRecord('Metamasker');
+    await getRepo().insertPlayer(guest);
+    const result = await signInWithEthereum({ ...(await ethBody()), sessionToken: guest.sessionToken });
+    assert.equal(result.source, 'guest');
+    assert.equal(result.accountId, ETH_ADDRESS);
+    assert.equal((await getRepo().findPlayerByToken(result.sessionToken)).nearAccountId, ETH_ADDRESS);
+  });
+
   it('a nonce is spent by a sign-in that commits, so it cannot be replayed', async () => {
-    const body = signedBody('erin.testnet');
-    await signInWithNear(body, fullAccess);
-    await assert.rejects(signInWithNear(body, fullAccess), { code: 'BAD_NONCE' });
+    const near = signedBody('erin.testnet');
+    await signInWithNear(near, fullAccess);
+    await assert.rejects(signInWithNear(near, fullAccess), { code: 'BAD_NONCE' });
+
+    const eth = await ethBody();
+    await signInWithEthereum(eth);
+    await assert.rejects(signInWithEthereum(eth), { code: 'BAD_NONCE' });
   });
 
   it('asks before leaving a guest save behind, without rotating anything', async () => {
@@ -140,19 +195,5 @@ describe('signInWithNear', () => {
     assert.equal(confirmed.source, 'existing');
     assert.deepEqual(released, [owned.sessionToken]);
     assert.ok(await getRepo().findPlayerByToken(guest.sessionToken), 'the guest save is left as it was');
-  });
-
-  it('sign-out kills a wallet token but never a guest token', async () => {
-    const { sessionToken } = await signInWithNear(signedBody('dave.testnet'), fullAccess);
-    const released = [];
-    await signOutNear(sessionToken, { releaseSession: async (t) => { released.push(t); } });
-    assert.deepEqual(released, [sessionToken]);
-    assert.equal(await getRepo().findPlayerByToken(sessionToken), null);
-    assert.equal((await getRepo().findPlayerByNearAccount('dave.testnet')).sessionExpiresAt, 0);
-
-    const guest = createPlayerRecord('Stays');
-    await getRepo().insertPlayer(guest);
-    await signOutNear(guest.sessionToken);
-    assert.ok(await getRepo().findPlayerByToken(guest.sessionToken));
   });
 });

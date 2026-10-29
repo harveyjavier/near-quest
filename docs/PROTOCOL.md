@@ -24,6 +24,7 @@ name is `harbor`. The client joins with `joinOrCreate`.
 | `GET` | `/catalog` | The full `CLIENT_CATALOG` payload (same object sent on join) |
 | `GET` | `/` | `{ name, endpoints }` |
 | `GET` | `/auth/near/challenge` | `{ nonce, message, recipient, network }`. The nonce works once and expires after 5 minutes. |
+| `POST` | `/auth/eth` | `{ address, signature, nonce, sessionToken?, displayName?, allowSwitch? }` → same as `/auth/near` |
 | `POST` | `/auth/signout` | `{ sessionToken }` → 204 |
 | `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName?, allowSwitch? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 409 / 429 / 503 |
 
@@ -36,6 +37,13 @@ startup and while the harbour is empty. The platform health check points at it.
 `/auth/near` checks the NEP-413 signature, then asks NEAR RPC whether
 `publicKey` is a full-access key of `accountId`. The client joins the room with
 the `sessionToken` it gets back.
+
+`/auth/eth` is MetaMask. MetaMask can't sign NEP-413, so the client calls
+`/auth/near/challenge?address=0x…` (lowercase), which adds `ethMessage`, and
+signs that text with `personal_sign`. The server recovers the signer and
+requires it to equal `address`. The address is the player's NEAR account id: an
+eth-implicit account (NEP-518) whose wallet contract only accepts that key.
+Addresses on NEAR's banned list are refused (`BANNED_ADDRESS`).
 
 Which player you get:
 
@@ -80,9 +88,14 @@ The auth endpoints allow 20 requests per IP per minute and return 429 after that
 
 On-chain flow: the client calls `ft_transfer` on `usdcContract` with
 `receiver_id: treasury` from the player's bound wallet, then sends
-`claim_deposit { txHash }`. The server reads the final transaction from RPC,
-checks signer, contract, method, receiver and success, and credits the amount
-the chain shows (rounded down to the cent, no deposit caps). A txHash credits once.
+`claim_deposit { txHash, senderId? }`. `senderId` is the transaction signer,
+which for MetaMask is NEAR's relayer; it is only used to look the transaction
+up. The server reads the final transaction with `EXPERIMENTAL_tx_status` and
+sums every successful `ft_transfer` receipt on the USDC contract whose
+predecessor is the player and whose `receiver_id` is the treasury. That covers
+both wallet-signed and relayed transfers, since `ft_transfer` always spends the
+predecessor's tokens. The amount is rounded down to the cent, with no deposit
+caps. A txHash credits once.
 
 | Server answer | Meaning | Client |
 |---|---|---|
@@ -90,7 +103,7 @@ the chain shows (rounded down to the cent, no deposit caps). A txHash credits on
 | `deposit_claimed { txHash, status: "credited", already: true }` | Credited earlier | Forgets the hash |
 | `deposit_claimed { txHash, status: "pending", already: true }` | An earlier claim stopped before the player was paid; an operator settles it | Keeps the hash |
 | `deposit_failed { txHash, code, message, retryable: true }` | `TX_PENDING` or `NEAR_UNAVAILABLE` | Retries after 5 s, 15 s, 45 s and 2 min while connected |
-| `deposit_failed { txHash, code, message, retryable: false }` | Not a deposit to us (`TX_NOT_USDC`, `AMOUNT_INVALID`, ...) | Forgets the hash |
+| `deposit_failed { txHash, code, message, retryable: false }` | Not a deposit to us (`TX_NOT_DEPOSIT`, `AMOUNT_INVALID`, ...) | Forgets the hash |
 
 The client keeps unconfirmed hashes in localStorage and resends them on each
 join for 7 days.

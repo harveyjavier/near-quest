@@ -33,6 +33,7 @@ Set in Railway (or Heroku) under **Variables**. Locally, copy
 | `TRUST_PROXY` | **on Railway/Heroku** | *(unset — off)* | Number of proxies in front of the server: `1` on Railway or Heroku. Leave unset when nothing sits in front, because `X-Forwarded-For` is then whatever the client sends, and trusting it lets anyone dodge the sign-in rate limit. |
 | `NEAR_NETWORK` | no | `testnet` | `testnet` or `mainnet`. The client follows the server. |
 | `NEAR_RPC_URL` | no | `https://rpc.<network>.near.org` | Used for sign-in key checks and deposit lookups. |
+| `NEAR_ARCHIVAL_RPC_URL` | no | `https://archival-rpc.<network>.near.org` | Asked only when `NEAR_RPC_URL` no longer has a deposit's transaction (regular nodes keep a few days; claims are retried for 7). Point it at your provider's archival endpoint in production. |
 | `NEAR_AUTH_RECIPIENT` | no | `robins-club` | Shown in the wallet's sign-in prompt and part of every signature. |
 | `NEAR_TREASURY_ACCOUNT` | to take deposits | *(unset)* | Turns on USDC deposits. Must be registered for storage on the USDC contract. |
 | `NEAR_USDC_CONTRACT` | no | Circle USDC for the network | Override only for a test token. |

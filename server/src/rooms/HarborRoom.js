@@ -56,6 +56,7 @@ import { HarborState, ChatEntry, LeaderEntry, PlayerState } from './schema/Harbo
 import { catchLogView, meView } from './views.js';
 import { log } from '../util/logger.js';
 import { validateTxHash, verifyUsdcDeposit } from '../payments/usdc.js';
+import { isValidAccountId } from '../auth/near.js';
 import {
   ValidationError,
   asObject,
@@ -485,10 +486,13 @@ export class HarborRoom extends Room {
       const accountId = runtime.record.nearAccountId;
       if (!accountId) throw new ValidationError('WALLET_REQUIRED', 'Sign in with a NEAR wallet to deposit.');
       const txHash = validateTxHash(payload.txHash);
+      // Only used to find the transaction; the checks are on the receipts.
+      const senderId = payload.senderId === undefined ? accountId : payload.senderId;
+      if (!isValidAccountId(senderId)) throw new ValidationError('BAD_TX', 'Invalid transaction sender.');
 
       let verified;
       try {
-        verified = await verifyUsdcDeposit({ txHash, accountId });
+        verified = await verifyUsdcDeposit({ txHash, accountId, senderId });
       } catch (error) {
         if (!(error instanceof ValidationError)) throw error;
         // Tied to the hash so the client knows which saved deposit to retry or drop.

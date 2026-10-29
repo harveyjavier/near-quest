@@ -9,6 +9,8 @@
 
 export const NEAR_NETWORK = process.env.NEAR_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
 export const NEAR_RPC_URL = process.env.NEAR_RPC_URL || `https://rpc.${NEAR_NETWORK}.near.org`;
+/** Asked only when the main RPC no longer has a transaction (regular nodes keep a few days). */
+export const NEAR_ARCHIVAL_RPC_URL = process.env.NEAR_ARCHIVAL_RPC_URL || `https://archival-rpc.${NEAR_NETWORK}.near.org`;
 
 /** Circle's native USDC on NEAR. Check against Circle's docs before going live. */
 const USDC_CONTRACTS = {
