@@ -23,12 +23,42 @@ name is `harbor`. The client joins with `joinOrCreate`.
 | `GET` | `/health` | `{ status, uptimeSeconds, database, players, room, time }` |
 | `GET` | `/catalog` | The full `CLIENT_CATALOG` payload (same object sent on join) |
 | `GET` | `/` | `{ name, endpoints }` |
+| `GET` | `/auth/near/challenge` | `{ nonce, message, recipient, network }`. The nonce works once and expires after 5 minutes. |
+| `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName?, allowSwitch? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 409 / 429 / 503 |
 
 `database` is `"mongodb"` or `"memory"`. In production it must read
 `"mongodb"` — see [OPERATIONS.md](OPERATIONS.md).
 
 `/health` deliberately does not depend on a room existing, so it answers during
 startup and while the harbour is empty. The platform health check points at it.
+
+`/auth/near` checks the NEP-413 signature, then asks NEAR RPC whether
+`publicKey` is a full-access key of `accountId`. The client joins the room with
+the `sessionToken` it gets back.
+
+Which player you get:
+
+1. The player already bound to the wallet (`source: "existing"`).
+2. Otherwise the guest `sessionToken` sent with the request, if it is not bound
+   yet (`source: "guest"`).
+3. Otherwise a new player (`source: "new"`).
+
+One wallet has at most one player.
+
+If the wallet already has a player and `sessionToken` is a different guest
+save that isn't bound to any wallet, the server answers **409
+`{ code: "SWITCH_REQUIRED", accountId, displayName }`** and changes nothing:
+no token rotates, nobody is kicked, and the nonce is still valid. The client
+asks the player, and on yes resends the same signed body with
+`allowSwitch: true`. A nonce is only spent by a sign-in that issues a session.
+
+Each sign-in gives the player a new `sessionToken`. The old one stops working,
+and anyone seated on it is saved and kicked with code 4001. A wallet device
+joins with `walletSession: true`. If its token has been replaced, the join fails
+with code 4401 and the client asks the player to sign in again, instead of
+creating a new guest.
+
+Both endpoints allow 20 requests per IP per minute and return 429 after that.
 
 `/catalog` exists so the client can render the shop and fish list before opening
 a socket, and so you can confirm from a terminal that a config change actually
@@ -44,6 +74,7 @@ Join options are sent by the client with `joinOrCreate`:
 {
   sessionToken: "<64 hex chars>",   // optional; omitted on a first visit
   displayName: "Angler"             // used only when no valid token is presented
+  walletSession: true               // optional; set by wallet devices, see /auth/near
 }
 ```
 

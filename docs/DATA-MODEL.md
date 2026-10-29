@@ -40,6 +40,7 @@ One document per guest session.
 | Field | Type | Notes |
 |---|---|---|
 | `sessionToken` | String | Unique, indexed. Opaque 64-char server-generated token. The only identity. |
+| `nearAccountId` | String | Optional. Unique, sparse. Set once by NEAR wallet sign-in, never changed. |
 | `displayName` | String | 3–16 chars. Set once at first join; later joins keep the stored value. |
 | `rodLevel` | Number | 1–10. |
 | `xp` | Number | Progress toward the next level. |

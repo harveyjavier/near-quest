@@ -4,7 +4,8 @@
  * NO ACCOUNTS, NO PERSONAL DATA: a player document is keyed by an opaque,
  * server-generated `sessionToken` held in the browser's localStorage. There is
  * no email, no password, no IP and no device fingerprint stored anywhere. The
- * only human-supplied field is the display name.
+ * only human-supplied field is the display name. A player who signs in with a
+ * NEAR wallet also carries its public `nearAccountId` (see auth/near.js).
  */
 
 import mongoose from 'mongoose';
@@ -103,6 +104,8 @@ export const PlayerSchema = new Schema(
   {
     sessionToken: { type: String, required: true, unique: true, index: true },
     displayName: { type: String, required: true },
+    // Set once by NEAR wallet sign-in; unique so one wallet owns one player.
+    nearAccountId: { type: String, unique: true, sparse: true },
 
     rodLevel: { type: Number, default: 1, min: 1 },
     xp: { type: Number, default: 0, min: 0 },

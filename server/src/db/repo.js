@@ -137,6 +137,24 @@ function mongoBackend({ Player, ChatMessage, World }) {
       return record;
     },
 
+    async findPlayerByNearAccount(nearAccountId) {
+      return fromStorage(await Player.findOne({ nearAccountId }).lean().exec());
+    },
+
+    /** False when the session is unknown or already bound to another wallet. */
+    async bindNearAccount(sessionToken, nearAccountId) {
+      const result = await Player.updateOne(
+        { sessionToken, nearAccountId: { $exists: false } },
+        { $set: { nearAccountId } },
+      ).exec();
+      return result.modifiedCount === 1;
+    },
+
+    async rotateSessionToken(oldToken, newToken) {
+      const result = await Player.updateOne({ sessionToken: oldToken }, { $set: { sessionToken: newToken } }).exec();
+      return result.modifiedCount === 1;
+    },
+
     async savePlayer(record) {
       await Player.updateOne(
         { sessionToken: record.sessionToken },
@@ -147,7 +165,8 @@ function mongoBackend({ Player, ChatMessage, World }) {
           // Named explicitly, and in the same round trip.
           $unset: Object.fromEntries(RETIRED_FIELDS.map((field) => [field, ''])),
         },
-        { upsert: true, strict: false },
+        // No upsert: a stale flush after a token rotation must not resurrect the old token.
+        { strict: false },
       ).exec();
     },
 
@@ -224,8 +243,31 @@ function memoryBackend() {
       return record;
     },
 
+    async findPlayerByNearAccount(nearAccountId) {
+      const found = [...players.values()].find((player) => player.nearAccountId === nearAccountId);
+      return found ? fromStorage(structuredClone(found)) : null;
+    },
+
+    async bindNearAccount(sessionToken, nearAccountId) {
+      const found = players.get(sessionToken);
+      if (!found || found.nearAccountId) return false;
+      found.nearAccountId = nearAccountId;
+      return true;
+    },
+
+    async rotateSessionToken(oldToken, newToken) {
+      const found = players.get(oldToken);
+      if (!found) return false;
+      players.delete(oldToken);
+      players.set(newToken, { ...found, sessionToken: newToken });
+      return true;
+    },
+
     async savePlayer(record) {
+      if (!players.has(record.sessionToken)) return;
       players.set(record.sessionToken, structuredClone({
+        // Keeps nearAccountId, which the room never writes back.
+        nearAccountId: players.get(record.sessionToken)?.nearAccountId,
         sessionToken: record.sessionToken,
         ...projectForSave(record),
       }));

@@ -8,7 +8,7 @@
  * a probability -- if one did, this file would ignore it.
  */
 
-import { Room } from '@colyseus/core';
+import { Room, ServerError } from '@colyseus/core';
 
 import {
   AUTO_FISHING,
@@ -75,6 +75,19 @@ import {
 /** How long a dropped client keeps its dock slot before being cleaned up. */
 const RECONNECT_GRACE_SECONDS = CONNECTION.reconnectGraceSeconds;
 
+/** Join rejection for a wallet device whose token was rotated by a later sign-in. */
+export const SESSION_EXPIRED = 4401;
+
+const liveRooms = new Set();
+
+/**
+ * Saves and evicts whoever is seated on `sessionToken`, in every room in this
+ * process. Called by wallet sign-in before it rotates that token.
+ */
+export async function releaseSession(sessionToken) {
+  await Promise.all([...liveRooms].map((room) => room.releaseSession(sessionToken)));
+}
+
 export class HarborRoom extends Room {
   constructor(...args) {
     super(...args);
@@ -118,6 +131,7 @@ export class HarborRoom extends Room {
   async onCreate() {
     this.state = new HarborState();
     this.autoDispose = false; // the harbor is a persistent world, not a match
+    liveRooms.add(this);
 
     await this.loadBaitStock();
     await this.loadEmissionTotals();
@@ -153,6 +167,11 @@ export class HarborRoom extends Room {
     // Returning device: look the guest session up by its opaque token.
     if (isValidSessionToken(requested.sessionToken)) {
       record = await repo.findPlayerByToken(requested.sessionToken);
+    }
+
+    // A wallet device must never silently fall back to a fresh guest.
+    if (!record && requested.walletSession === true) {
+      throw new ServerError(SESSION_EXPIRED, 'Your wallet session has expired. Please sign in again.');
     }
 
     if (!record) {
@@ -240,6 +259,7 @@ export class HarborRoom extends Room {
   }
 
   async onDispose() {
+    liveRooms.delete(this);
     // Close the open emission window before the last save, or a shutdown
     // silently drops whatever the harbour minted since the previous flush.
     if (EMISSION_MONITOR.enabled) this.flushEmission();
@@ -917,6 +937,19 @@ export class HarborRoom extends Room {
       this.clientBySessionId(sessionId)?.leave(4001);
       this.runtime.delete(sessionId);
       this.state.players.delete(sessionId);
+    }
+  }
+
+  async releaseSession(sessionToken) {
+    for (const [sessionId, runtime] of this.runtime) {
+      if (runtime.record.sessionToken !== sessionToken) continue;
+      // Out of the map before the await, so no periodic flush races the rotation.
+      this.runtime.delete(sessionId);
+      this.state.players.delete(sessionId);
+      this.state.onlineCount = this.state.players.size;
+      this.clientBySessionId(sessionId)?.leave(4001);
+      runtime.dirty = true;
+      await this.persist(runtime);
     }
   }
 

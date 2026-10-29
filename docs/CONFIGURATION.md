@@ -29,6 +29,7 @@ Set in Railway (or Heroku) under **Variables**. Locally, copy
 | `CORS_ORIGIN` | **in production** | *(unset — allows any origin)* | Comma-separated exact browser origins, scheme included. Leave unset only in development. |
 | `PORT` | no | `2567` | **Do not set this on Railway or Heroku.** They inject it; setting it yourself breaks the health check. |
 | `LOG_LEVEL` | no | `info` | `debug` \| `info` \| `warn` \| `error`. |
+| `TRUST_PROXY` | **on Railway/Heroku** | *(unset — off)* | Number of proxies in front of the server: `1` on Railway or Heroku. Leave unset when nothing sits in front, because `X-Forwarded-For` is then whatever the client sends, and trusting it lets anyone dodge the sign-in rate limit. |
 
 Nothing else is read from the environment. There are no feature flags, no
 secrets beyond `MONGO_URL`, and no per-deployment balance overrides — that is
