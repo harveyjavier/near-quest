@@ -17,7 +17,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 
 import { CLIENT_CATALOG, CONNECTION, ROOM_NAME } from './config/index.js';
 import { HarborRoom, releaseSession } from './rooms/HarborRoom.js';
-import { NEAR_NETWORK, SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, assertAuthRate, issueNonce, signInWithNear } from './auth/near.js';
+import { NEAR_NETWORK, SIGN_IN_MESSAGE, SIGN_IN_RECIPIENT, assertAuthRate, issueNonce, signInWithNear, signOutNear } from './auth/near.js';
 import { connectDatabase, disconnectDatabase, getRepo, repoKind } from './db/repo.js';
 import { log } from './util/logger.js';
 
@@ -102,8 +102,18 @@ async function main() {
     }
   });
 
+  app.post('/auth/signout', async (request, response) => {
+    try {
+      assertAuthRate(request.ip);
+      await signOutNear(request.body?.sessionToken, { releaseSession });
+      response.status(204).end();
+    } catch (error) {
+      authError(response, error);
+    }
+  });
+
   app.get('/', (_request, response) =>
-    response.json({ name: 'Fishing Idle Game MMO', endpoints: ['/health', '/catalog', '/auth/near/challenge', '/auth/near'] }));
+    response.json({ name: 'Fishing Idle Game MMO', endpoints: ['/health', '/catalog', '/auth/near/challenge', '/auth/near', '/auth/signout'] }));
 
   // Express 5 error handler: never leak a stack trace to a browser.
   // eslint-disable-next-line no-unused-vars

@@ -61,6 +61,7 @@ function prepareGate() {
       ? `Signed in with NEAR as ${nearAccount}.`
       : 'Your progress on this device was found.';
     gate.forget.hidden = false;
+    gate.forget.textContent = nearAccount ? 'Sign out of NEAR' : 'Not you? Start a new guest session';
   } else {
     gate.input.value = savedName ?? '';
     gate.returning.hidden = true;
@@ -156,7 +157,7 @@ async function connectAndStart(displayName) {
       forgetSession();
       prepareGate();
       gate.start.disabled = false;
-      gate.error.textContent = 'Your NEAR session ended because you signed in on another device. Sign in with your wallet again.';
+      gate.error.textContent = 'Your NEAR session has ended (it expired, or you signed in somewhere else). Sign in with your wallet again.';
       return;
     }
     gate.error.textContent = describeConnectionFailure(error);
@@ -228,7 +229,19 @@ gate.wallet.addEventListener('click', async () => {
   }
 });
 
-gate.forget.addEventListener('click', () => {
+gate.forget.addEventListener('click', async () => {
+  if (storedNearAccount()) {
+    gate.forget.disabled = true;
+    try {
+      const { signOutNear } = await import('./net/nearWallet.js');
+      await signOutNear(storedSessionToken());
+    } catch (error) {
+      // The server-side revoke is best effort; signing out locally still happens.
+      console.error('Server sign-out failed:', error);
+    } finally {
+      gate.forget.disabled = false;
+    }
+  }
   forgetSession();
   prepareGate();
 });

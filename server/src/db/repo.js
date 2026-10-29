@@ -150,8 +150,11 @@ function mongoBackend({ Player, ChatMessage, World }) {
       return result.modifiedCount === 1;
     },
 
-    async rotateSessionToken(oldToken, newToken) {
-      const result = await Player.updateOne({ sessionToken: oldToken }, { $set: { sessionToken: newToken } }).exec();
+    async rotateSessionToken(oldToken, newToken, sessionExpiresAt) {
+      const result = await Player.updateOne(
+        { sessionToken: oldToken },
+        { $set: { sessionToken: newToken, sessionExpiresAt } },
+      ).exec();
       return result.modifiedCount === 1;
     },
 
@@ -255,19 +258,20 @@ function memoryBackend() {
       return true;
     },
 
-    async rotateSessionToken(oldToken, newToken) {
+    async rotateSessionToken(oldToken, newToken, sessionExpiresAt) {
       const found = players.get(oldToken);
       if (!found) return false;
       players.delete(oldToken);
-      players.set(newToken, { ...found, sessionToken: newToken });
+      players.set(newToken, { ...found, sessionToken: newToken, sessionExpiresAt });
       return true;
     },
 
     async savePlayer(record) {
       if (!players.has(record.sessionToken)) return;
       players.set(record.sessionToken, structuredClone({
-        // Keeps nearAccountId, which the room never writes back.
+        // Keeps the auth fields, which the room never writes back.
         nearAccountId: players.get(record.sessionToken)?.nearAccountId,
+        sessionExpiresAt: players.get(record.sessionToken)?.sessionExpiresAt,
         sessionToken: record.sessionToken,
         ...projectForSave(record),
       }));

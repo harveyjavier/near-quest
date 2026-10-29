@@ -24,6 +24,7 @@ name is `harbor`. The client joins with `joinOrCreate`.
 | `GET` | `/catalog` | The full `CLIENT_CATALOG` payload (same object sent on join) |
 | `GET` | `/` | `{ name, endpoints }` |
 | `GET` | `/auth/near/challenge` | `{ nonce, message, recipient, network }`. The nonce works once and expires after 5 minutes. |
+| `POST` | `/auth/signout` | `{ sessionToken }` → 204 |
 | `POST` | `/auth/near` | `{ accountId, publicKey, signature, nonce, callbackUrl?, sessionToken?, displayName?, allowSwitch? }` → `{ sessionToken, displayName, accountId, source }`, or `{ code, error }` with 401 / 409 / 429 / 503 |
 
 `database` is `"mongodb"` or `"memory"`. In production it must read
@@ -58,7 +59,14 @@ joins with `walletSession: true`. If its token has been replaced, the join fails
 with code 4401 and the client asks the player to sign in again, instead of
 creating a new guest.
 
-Both endpoints allow 20 requests per IP per minute and return 429 after that.
+Wallet sessions last 30 days from sign-in. After that the join also fails with
+4401. Guest sessions don't expire.
+
+`POST /auth/signout` with `{ sessionToken }` ends a wallet session: the token is
+replaced and any live seat is saved and kicked. It returns 204 whatever the
+token is, and does nothing to guest tokens, since that would lose the save.
+
+The auth endpoints allow 20 requests per IP per minute and return 429 after that.
 
 `/catalog` exists so the client can render the shop and fish list before opening
 a socket, and so you can confirm from a terminal that a config change actually

@@ -25,6 +25,8 @@ export const SIGN_IN_MESSAGE = "Sign in to Robin's Club";
 export const SIGN_IN_RECIPIENT = process.env.NEAR_AUTH_RECIPIENT || 'robins-club';
 
 const NONCE_TTL_MS = 5 * 60_000;
+/** Wallet sessions end after this and need a fresh signature. Guests never expire: they have no way back in. */
+export const WALLET_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 // Unauthenticated endpoint issues these, so the map is capped.
 const MAX_PENDING_NONCES = 10_000;
 const NEP413_TAG = 2 ** 31 + 413;
@@ -115,20 +117,22 @@ export function nep413Hash({ message, nonce, recipient, callbackUrl = null }) {
   ])).digest();
 }
 
-async function rpcAccessKey(accountId, publicKey) {
+/** One JSON-RPC call. Resolves with `{ result, error }` as NEAR returns them. */
+export async function nearRpc(method, params) {
   const response = await fetch(NEAR_RPC_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 'auth',
-      method: 'query',
-      params: { request_type: 'view_access_key', finality: 'final', account_id: accountId, public_key: publicKey },
-    }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'game', method, params }),
     signal: AbortSignal.timeout(8000),
   });
-  const body = await response.json();
-  return body.result ?? null;
+  return response.json();
+}
+
+async function rpcAccessKey(accountId, publicKey) {
+  const { result } = await nearRpc('query', {
+    request_type: 'view_access_key', finality: 'final', account_id: accountId, public_key: publicKey,
+  });
+  return result ?? null;
 }
 
 /**
@@ -200,6 +204,8 @@ function switchRequired(player) {
 }
 
 export async function signInWithNear(body, { releaseSession = async () => {}, ...options } = {}) {
+  const now = options.now ?? Date.now();
+  const sessionExpiresAt = now + WALLET_SESSION_TTL_MS;
   const accountId = await verifyNearSignIn(body, options);
   const repo = getRepo();
 
@@ -226,7 +232,11 @@ export async function signInWithNear(body, { releaseSession = async () => {}, ..
   }
 
   if (!player) {
-    const record = { ...createPlayerRecord(coerceDisplayName(body.displayName, accountId.slice(0, 4))), nearAccountId: accountId };
+    const record = {
+      ...createPlayerRecord(coerceDisplayName(body.displayName, accountId.slice(0, 4))),
+      nearAccountId: accountId,
+      sessionExpiresAt,
+    };
     await repo.insertPlayer(record);
     log.info(`New wallet player "${record.displayName}" for ${accountId}.`);
     return { sessionToken: record.sessionToken, displayName: record.displayName, accountId, source: 'new' };
@@ -234,8 +244,22 @@ export async function signInWithNear(body, { releaseSession = async () => {}, ..
 
   await releaseSession(player.sessionToken);
   const sessionToken = token(32);
-  if (!await repo.rotateSessionToken(player.sessionToken, sessionToken)) {
+  if (!await repo.rotateSessionToken(player.sessionToken, sessionToken, sessionExpiresAt)) {
     throw new ValidationError('BUSY', 'Sign-in raced another sign-in. Try again.');
   }
   return { sessionToken, displayName: player.displayName, accountId, source };
+}
+
+/**
+ * Ends a wallet session on the server: the token is replaced by one nobody
+ * holds. Guest tokens are left alone, since revoking one would delete the save.
+ * Answers the same either way so it can't be used to probe tokens.
+ */
+export async function signOutNear(sessionToken, { releaseSession = async () => {} } = {}) {
+  if (!isValidSessionToken(sessionToken)) return;
+  const player = await getRepo().findPlayerByToken(sessionToken);
+  if (!player?.nearAccountId) return;
+  await releaseSession(sessionToken);
+  await getRepo().rotateSessionToken(sessionToken, token(32), 0);
+  log.info(`Signed out ${player.nearAccountId}.`);
 }
