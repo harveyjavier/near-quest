@@ -241,7 +241,8 @@ player to it (`nearAccountId`, one player per account). The wire format is in
   after 30 days, and `POST /auth/signout` revokes one. A wallet device whose
   token died gets "sign in again" (join code 4401), never a fresh guest.
   Expiry is checked when a player joins, not during play: a session that
-  expires mid-play runs until the player leaves or reconnects.
+  expires mid-play runs until the player leaves and joins again. A reconnect
+  inside the grace window skips the check too, since it never runs `onJoin`.
 - **First wallet sign-in on a device** binds that device's guest save, unless
   the wallet already owns a player. Then the server refuses with
   `SWITCH_REQUIRED` before changing anything, the player is asked, and only a
