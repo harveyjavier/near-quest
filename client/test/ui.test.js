@@ -160,6 +160,50 @@ describe('wallet UI', { skip: !process.env.CI && noBrowser }, () => {
     await page.close();
   });
 
+  it('prices chest keys and shows the assay fee', async () => {
+    const page = await openGame();
+    await page.fill('#gate-name', 'Keyholder');
+    await page.click('#gate-start');
+    await page.locator('#hud').waitFor({ state: 'visible', timeout: 20_000 });
+    await page.waitForFunction(() => window.__fishing?.hud?.me && window.__fishing.hud.catalog);
+
+    // A Legendary in the bag and 5 Gold: the key is 20, so nothing may be sent.
+    const label = await page.evaluate(() => {
+      const { hud, net } = window.__fishing;
+      net.openChest = () => { window.__openSent = true; };
+      hud.me = { ...hud.me, gold: 5, chests: [{ id: 'a'.repeat(16), tier: 'legendary', at: 0 }] };
+      hud.showChestPreview({ tier: 'legendary', name: 'Legendary Chest', color: '#f5a623', ids: ['a'.repeat(16)] });
+      return document.querySelector('.chestopen__spin').textContent;
+    });
+    assert.equal(label, 'Open chest (20 Gold)');
+    await page.click('.chestopen__spin');
+    await page.locator('.toast', { hasText: 'Opening this chest costs 20 Gold.' }).waitFor();
+    assert.equal(await page.evaluate(() => window.__openSent ?? false), false);
+
+    // Free tiers keep the plain label.
+    assert.equal(await page.evaluate(() => {
+      const { hud } = window.__fishing;
+      hud.closeModal();
+      hud.showChestPreview({ tier: 'common', name: 'Common Chest', color: '#ccc', ids: ['b'.repeat(16)] });
+      return document.querySelector('.chestopen__spin').textContent;
+    }), 'Open chest');
+
+    // An appraisal result as the server sends it: gross 400, fee 60, paid 340.
+    await page.evaluate(() => {
+      const { hud } = window.__fishing;
+      hud.closeModal();
+      hud.showGemAppraisal({ tier: 'ruby', name: 'Uncut Ruby', color: '#c41e3a', ids: ['c'.repeat(16)] });
+      const grades = hud.catalog.appraisal.traits.map((trait) => ({ id: trait.id, grade: 'B', color: '#fff', score: 2 }));
+      hud.showGemAppraisalResult({ tier: 'ruby', grades, score: 8, maxScore: 16, gross: 400, fee: 60, gold: 340 });
+    });
+    const fee = page.locator('.appraise__trait--fee');
+    await fee.waitFor({ timeout: 15_000 });
+    assert.equal(await fee.locator('dd').textContent(), '−60 Gold');
+    assert.equal(await fee.locator('dt').getAttribute('title'), 'The assayer keeps 15% of the price.');
+    assert.match(await page.locator('.appraise__claim').textContent(), /^Claim 340 /);
+    await page.close();
+  });
+
   it('asks before leaving a guest save behind, and saying no changes nothing', async () => {
     // Its own wallet, so earlier tests' saves don't leak in.
     const owner = privateKeyToAccount(generatePrivateKey());
@@ -200,3 +244,4 @@ describe('wallet UI', { skip: !process.env.CI && noBrowser }, () => {
     await guestDevice.close();
   });
 });
+

@@ -2731,8 +2731,10 @@ export class Hud {
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'btn chestopen__spin';
-    open.textContent = 'Open chest';
+    const keyCost = this.chestKeyCost(stack.tier);
+    open.textContent = keyCost ? `Open chest (${keyCost} Gold)` : 'Open chest';
     open.onclick = () => {
+      if (!this.canPayChestKey(stack.tier)) return;
       this.markOpening(open);
       this.startReel();
       this.openNextChest();
@@ -2749,6 +2751,7 @@ export class Hud {
       all.className = 'btn chestopen__all';
       all.textContent = `Open all (${remaining.length})`;
       all.onclick = () => {
+        if (!this.canPayChestKey(stack.tier)) return;
         this.chest.auto = true;
         all.disabled = true;
         open.disabled = true;
@@ -2769,10 +2772,29 @@ export class Hud {
     return held?.length ? held.map((chest) => chest.id) : [...fallbackIds];
   }
 
+  /** Gold to open one chest of `tier`, from the catalog. */
+  chestKeyCost(tier) {
+    return this.catalog?.chestTiers?.find((entry) => entry.id === tier)?.keyCost ?? 0;
+  }
+
+  /**
+   * Whether the player can pay this tier's key, with a toast when not. Checked
+   * before the reel starts; the server is what actually enforces it.
+   */
+  canPayChestKey(tier) {
+    const cost = this.chestKeyCost(tier);
+    if ((this.me?.gold ?? 0) >= cost) return true;
+    this.toast(`Opening this chest costs ${formatNumber(cost)} Gold.`, 'warn');
+    return false;
+  }
+
   /** Sends the next chest of the open session's tier, if one is still held. */
   openNextChest() {
-    const next = this.chestsInStack(this.chest?.tier ?? '')[0];
+    const tier = this.chest?.tier ?? '';
+    const next = this.chestsInStack(tier)[0];
     if (!next) return false;
+    // Open all stops here, quietly, when the Gold for the next key runs out.
+    if ((this.me?.gold ?? 0) < this.chestKeyCost(tier)) return false;
 
     this.net.openChest(next);
     return true;
@@ -3233,8 +3255,10 @@ export class Hud {
     const again = document.createElement('button');
     again.type = 'button';
     again.className = 'btn chestopen__spin';
-    again.textContent = 'Open another';
+    const keyCost = this.chestKeyCost(session.tier);
+    again.textContent = keyCost ? `Open another (${keyCost} Gold)` : 'Open another';
     again.onclick = () => {
+      if (!this.canPayChestKey(session.tier)) return;
       this.markOpening(again);
       // The stage is holding the last reward; the strip comes back over it and
       // the next reveal rebuilds the panel around the spin already running.
@@ -3249,6 +3273,7 @@ export class Hud {
       all.className = 'btn chestopen__all';
       all.textContent = `Open all (${remaining.length})`;
       all.onclick = () => {
+        if (!this.canPayChestKey(session.tier)) return;
         session.auto = true;
         all.disabled = true;
         again.disabled = true;
@@ -3812,9 +3837,10 @@ export class Hud {
       paid += trait.score;
       // The last trait lands on the exact figure the server sent; the ones
       // before it show the share of it the grades so far have earned.
+      const gross = result.gross ?? result.gold;
       const shown = index === grades.length - 1
-        ? result.gold
-        : Math.round(result.gold * (paid / total));
+        ? gross
+        : Math.round(gross * (paid / total));
       // Quoted in dollars, the same money the range under the stone is in, so
       // the climbing figure can be read against what the tier was worth.
       panel.price.textContent = formatDollars(shown, panel.rate);
@@ -3826,8 +3852,22 @@ export class Hud {
     };
 
     const finish = () => {
-      panel.price.textContent = formatDollars(result.gold, panel.rate);
+      panel.price.textContent = formatDollars(result.gross ?? result.gold, panel.rate);
       panel.price.classList.add('appraise__price--final');
+      // The assayer's cut, as one more line on the grading sheet.
+      const sheet = panel.rows[0]?.row.parentElement;
+      if (result.fee && sheet) {
+        const row = document.createElement('div');
+        row.className = 'appraise__trait appraise__trait--graded appraise__trait--fee';
+        const label = document.createElement('dt');
+        label.textContent = 'Fee:';
+        label.title = `The assayer keeps ${Math.round((this.catalog?.appraisal?.feeRate ?? 0) * 100)}% of the price.`;
+        const value = document.createElement('dd');
+        value.className = 'appraise__grade';
+        value.textContent = `−${formatNumber(result.fee)} Gold`;
+        row.append(label, value);
+        sheet.append(row);
+      }
       panel.gembox?.classList.add('appraise__gembox--valued');
 
       // The rough stone becomes the finished gem the moment it is done being

@@ -16,6 +16,8 @@
 import {
   APPRAISAL_GRADES,
   APPRAISAL_TRAITS,
+  ASSAY_FEE_RATE,
+  CHEST_KEY_COST,
   CHEST_TIERS_BY_ID,
   CHEST_TIER_WEIGHTS,
   MAX_APPRAISAL_SCORE,
@@ -146,9 +148,14 @@ export function openChest(player, chestId, now = Date.now()) {
   const index = player.chests.findIndex((chest) => chest.id === chestId);
   if (index === -1) return { ok: false, code: 'CHEST_NOT_OWNED' };
 
+  // Checked before the chest leaves the bag, so a player who can't pay keeps it.
+  const keyCost = CHEST_KEY_COST[player.chests[index].tier] ?? 0;
+  if (player.gold < keyCost) return { ok: false, code: 'KEY_UNAFFORDABLE', cost: keyCost };
+
   const [chest] = player.chests.splice(index, 1);
   const tier = CHEST_TIERS_BY_ID[chest.tier];
   if (!tier) return { ok: false, code: 'CHEST_TIER_UNKNOWN' };
+  player.gold -= keyCost;
 
   // One roll, one reward. Entries that cannot be honoured -- a gem landing on
   // a full gem bag -- are retried against the rest of the table, so a chest
@@ -175,6 +182,7 @@ export function openChest(player, chestId, now = Date.now()) {
     tierName: tier.name,
     color: tier.color,
     rewards,
+    keyCost,
     levelUp: applied.levelUp,
     at: now,
   };
@@ -241,7 +249,9 @@ export function appraiseGem(player, gemId, now = Date.now()) {
   const share = (score + random()) / (MAX_APPRAISAL_SCORE + 1);
 
   const { min, max } = tier.gold;
-  const gold = Math.min(max, Math.max(min, Math.round(min + (max - min) * share)));
+  const gross = Math.min(max, Math.max(min, Math.round(min + (max - min) * share)));
+  const fee = Math.round(gross * ASSAY_FEE_RATE);
+  const gold = gross - fee;
   player.gold += gold;
   // The single largest Gold faucet in the game, and the one an exploit would
   // aim at -- counted here, where the coin is actually created.
@@ -259,6 +269,8 @@ export function appraiseGem(player, gemId, now = Date.now()) {
     grades,
     score,
     maxScore: MAX_APPRAISAL_SCORE,
+    gross,
+    fee,
     gold,
     goldTotal: player.gold,
     at: now,

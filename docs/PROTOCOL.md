@@ -181,8 +181,8 @@ design. A client that wants gold has to buy, catch or appraise for it.
 | `cast_started` | `{ endsAt, ... }` | A cast entered the water |
 | `cast_result` | Catch, chest drop, XP, log entry | A cast resolved |
 | `cast_cancelled` | `{ reason, ... }` | Auto-fishing turned off mid-cast |
-| `chest_opened` | The single reward drawn | After `open_chest` |
-| `gem_appraised` | Grades, traits, gold paid | After `appraise_gem` |
+| `chest_opened` | The single reward drawn, and `keyCost` (Gold paid to open it) | After `open_chest` |
+| `gem_appraised` | Grades, traits, `gross` price, `fee` (assay fee), `gold` paid | After `appraise_gem` |
 | `rod_upgraded` | New level and rod | After `upgrade_rod` |
 | `consumable_used` | Effect applied | After `use_consumable` |
 | `fish_cashed` | XP gained, species | After `cash_out_species` |
@@ -258,6 +258,7 @@ Delivered as `error_msg` with a human-readable `message` beside the code.
 | `FISH_BAG_FULL` | Every fish slot is occupied; casting is blocked until you cash in. |
 | `SESSION_TAKEN_OVER` | The same session token joined elsewhere; this seat was evicted. |
 | `SERVER_ERROR` | Unexpected failure. Details are logged server-side only. |
+| `KEY_UNAFFORDABLE` | Not enough Gold for this chest tier's key. The chest stays in the bag. |
 
 Plus per-action failures returned by the game modules — an unavailable chest or
 gem id, insufficient gold for an upgrade or purchase, no fish of the requested

@@ -133,7 +133,7 @@ Run from the repository root.
 | `npm run install:all` | Install both workspaces. |
 | `npm run dev:server` | Server with `--watch`. |
 | `npm run dev:client` | Vite dev server. |
-| `npm test` | Server suite (107 tests) + client unit tests. |
+| `npm test` | Server suite (142 tests) + client unit tests. |
 | `npm run build` | Production client build into `client/dist`. |
 | `npm run verify` | `npm test` then `npm run build`. What CI runs. |
 | `npm run smoke` | End-to-end test against a running server. |
@@ -149,7 +149,7 @@ Three layers, and they cover different failure modes.
 
 ### Unit and integration — `npm test`
 
-`server/test/game.test.js` (107 assertions across 18 suites) exercises the game
+`server/test/game.test.js` exercises the game
 modules directly: catch and chest rolls at every rod and stake, chest reward
 tables, gem appraisal, purchases and stock, progression and upgrade costs, bag
 caps and their overflow behaviour, and validation of every message payload

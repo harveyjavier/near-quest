@@ -333,7 +333,10 @@ export class HarborRoom extends Room {
       const result = openChest(runtime.record, chestId);
 
       if (!result.ok) {
-        client.send('error_msg', { code: result.code, message: 'That chest is no longer available.' });
+        const message = result.code === 'KEY_UNAFFORDABLE'
+          ? `Opening this chest costs ${result.cost} Gold.`
+          : 'That chest is no longer available.';
+        client.send('error_msg', { code: result.code, message });
         return;
       }
 

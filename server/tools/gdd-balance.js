@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { FISH } from '../src/config/fish.config.js';
 import { RODS } from '../src/config/rods.config.js';
 import { RISK_BANDS, STAKE_LEVELS } from '../src/config/game.config.js';
-import { CHEST_TIERS, GEM_TIERS, APPRAISAL_GRADES } from '../src/config/rewards.config.js';
+import { ASSAY_FEE_RATE, CHEST_KEY_COST, CHEST_TIERS, GEM_TIERS, APPRAISAL_GRADES } from '../src/config/rewards.config.js';
 import { SHOP_ITEMS } from '../src/config/economy.config.js';
 import { CHEST_EV, GEM_MEAN_GOLD, castExpectation } from '../src/game/balanceModel.js';
 import { upgradeCost } from '../src/game/progression.js';
@@ -22,7 +22,7 @@ const tiersOf=l=>l.chestTiers.map(t=>CHEST_TIERS.find(c=>c.id===t).name.replace(
 // number. With one item on the shelf, cheapest and dearest are the same row.
 const tin=SHOP_ITEMS[0], crate=SHOP_ITEMS.at(-1);
 const tinRate=tin.cost.amount/tin.grants.bait, crateRate=crate.cost.amount/crate.grants.bait;
-const netGold=(r,s)=>{const v=stats(r,s),h=3600/v.seconds;return (v.ev.gold-Math.max(0,s-v.ev.bait)*crateRate)*h;};
+const netGold=(r,s)=>{const v=stats(r,s),h=3600/v.seconds;return (v.ev.gold-v.keyGold-Math.max(0,s-v.ev.bait)*crateRate)*h;};
 let cumulative=0;
 table('Rod progression',['Level / rod','XP to next','Total XP to enter','Cast seconds','Base catch','Rarity bias','Chest per catch','Gold skip (empty bar)'],RODS.map(r=>{const row=[r.level+' / '+r.name,r.xpToNext??'MAX',cumulative,n(r.castMs/1000),pct(r.catchRate),r.rarityBias,pct(r.chestChance),upgradeCost(r.level)?.gold??'—'];cumulative+=r.xpToNext??0;return row;}));
 table('Stake ladder',['Stake / bait per cast','Risk Dial','Name','Catch multiplier','Rarity bias','XP multiplier','Chest multiplier','Chest tiers reachable'],STAKE_LEVELS.map(l=>[l.stake,RISK_BANDS.find(b=>b.id===l.band).name,l.name,l.catchRateMult,l.rarityBias,l.xpMult,l.chestChanceMult,tiersOf(l)]));
@@ -35,7 +35,8 @@ table('Shop',['Item','Gold','Bait','Gold / bait','Discount vs tin'],SHOP_ITEMS.m
 table('Catch and chest odds: all rods and stakes',['Rod',...STAKES.map(s=>s+'x catch / chest per cast')],RODS.map(r=>[r.level,...STAKES.map(s=>{const v=stats(r,s);return pct(v.hit)+' / '+pct(v.chest);})]));
 table('Species composition: all rods and stakes',['Rod','Stake',...FISH.map(f=>f.name)],RODS.flatMap(r=>STAKES.map(s=>{const v=stats(r,s);return [r.level,s,...FISH.map(f=>pct(v.species[f.id]))];})));
 table('Chest tier composition: all rods and stakes',['Rod','Stake',...CHEST_TIERS.map(t=>t.name)],RODS.flatMap(r=>STAKES.map(s=>{const v=stats(r,s);return [r.level,s,...CHEST_TIERS.map(t=>pct(v.tiers[t.id]))];})));
-table('Hourly economy: every rod and stake',['Rod','Stake','Catches','Chests','XP','Gold','Pearl','Bait spent','Chest bait','Net Gold after bulk bait replacement'],RODS.flatMap(r=>STAKES.map(s=>{const v=stats(r,s),h=3600/v.seconds;return [r.level,s,n(v.hit*h),n(v.chest*h),n(v.ev.xp*h),n(v.ev.gold*h),n(v.ev.pearls*h),n(s*h),n(v.ev.bait*h),n(netGold(r,s))];})));
+table('Hourly economy: every rod and stake',['Rod','Stake','Catches','Chests','XP','Gold','Pearl','Bait spent','Chest bait','Chest keys','Net Gold after bait and keys'],RODS.flatMap(r=>STAKES.map(s=>{const v=stats(r,s),h=3600/v.seconds;return [r.level,s,n(v.hit*h),n(v.chest*h),n(v.ev.xp*h),n(v.ev.gold*h),n(v.ev.pearls*h),n(s*h),n(v.ev.bait*h),n(v.keyGold*h),n(netGold(r,s))];})));
+out.push('Gold is what appraisals pay after the '+Math.round(ASSAY_FEE_RATE*100)+'% assay fee. Chest keys are the Gold spent opening Epic ('+CHEST_KEY_COST.epic+') and Legendary ('+CHEST_KEY_COST.legendary+') chests.','');
 out.push('Net Gold uses the shelf price, '+crateRate.toFixed(2)+' Gold/bait, and fractional-pack accounting. It assumes sufficient cash and stock; it does not establish new-player solvency. At rod 10, XP has no further rod benefit.','');
 table('The spread the lever is worth: Stake 1 against Stake 40',['Rod','Gold/hour at 1x','Gold/hour at 40x','Ratio','Net Gold/hour at 1x','Net Gold/hour at 40x'],RODS.map(r=>{const g=s=>{const v=stats(r,s);return v.ev.gold*3600/v.seconds;};const lo=g(1),hi=g(40);return [r.level,n(lo),n(hi),n(hi/lo)+'x',n(netGold(r,1)),n(netGold(r,40))];}));
 out.push('The ratio is the headline number the design sells: what turning the one lever from the bottom of the ladder to the top is worth per hour. It is quoted on **gross** Gold because that is a property of the fishing loop alone.','','The two net columns are quoted separately because net Gold also depends on the Bait price, which is set on the shelf rather than here: the shop sells 100 Bait for 3 Gold, so bait costs '+crateRate.toFixed(2)+' Gold each. The rest of `design/gold-value-anchor-rebalance-plan.md` (cast cost, gem values, drop rates) is still open. Stake 1 here reproduces the old Steady-at-Stake-1 economy to the coin. See the note on SHOP_ITEMS in `server/src/config/economy.config.js`.','');

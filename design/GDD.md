@@ -4,7 +4,7 @@
 
 Fishing Idle Game MMO is a browser-based multiplayer idle fishing game. Players cast automatically from a shared dock, level up a fishing rod over ten levels, and collect fish, treasure chests, and gems in real time alongside other players in the same world. The core game loop — cast, catch, level up, open chests, appraise gems — is complete and fully playable today.
 
-The game currently has **no monetization**. Every currency in the game — Bait, Gold, and Pearl — is earned entirely through play. There are no purchases, subscriptions, or premium currency of any kind.
+Bait, Gold and Pearl are earned entirely through play. The one exception is **USDG**, an in-game dollar balance that can be topped up by depositing USDC on the NEAR blockchain and spent on Gold. Deposits are switched off unless the operator configures a treasury account, and there is no way to withdraw. Players can play as guests or sign in with a NEAR wallet or MetaMask.
 
 The design's central lever is **Stake**: a single dial, from 1 to 40, setting how much Bait a player commits to each cast. Raising it is the whole risk. A high Stake bites less often, and pays for that in rarer fish, better treasure, and chest tiers a low Stake can never reach. This trade-off is deliberately dramatic — modeling shows the top of the ladder generates **roughly 45 times more in-game wealth per hour** than the bottom (Section 8, Play Style Comparison). That gap is the intended design, not an imbalance.
 
@@ -18,10 +18,11 @@ This document describes the game exactly as it stands today, system by system, w
 | **Platform** | Runs in the browser, on desktop and mobile |
 | **Getting started** | No account needed. A player picks a display name and is fishing within seconds |
 | **World capacity** | Up to 8 players fishing in the same world at once |
-| **Monetization** | None. Every currency is earned by playing; there is no real-money purchase path anywhere in the game |
-| **What's live right now** | Fishing, rod progression, treasure chests, gem appraisal, a shop, chat, an online player list, and a leaderboard |
+| **Monetization** | Optional USDC deposits on NEAR into USDG, which buys Gold. Off unless a treasury account is configured. No withdrawals |
+| **Accounts** | Guest by default. Optional sign-in with a NEAR wallet or MetaMask keeps the save with the wallet across devices |
+| **What's live right now** | Fishing, rod progression, treasure chests, gem appraisal, a shop, chat, an online player list, a leaderboard, and wallet sign-in |
 
-A player's progress is tied to their browser, not to an account — closing and reopening the browser picks up right where they left off, but progress does not currently transfer between devices.
+A guest's progress is tied to their browser — closing and reopening it picks up where they left off, but it doesn't move between devices. Signing in with a NEAR wallet or MetaMask ties the save to the wallet instead, so it follows the player to any device.
 
 **Fairness by design.** Every catch, every chest, and every gem is decided on the server, never in the player's browser — so nothing a player's device does can influence an outcome in their favor. This is a deliberate integrity guarantee: what a player sees is what actually happened.
 
@@ -134,8 +135,9 @@ Three currencies, each with a clear role:
 | Currency | How It's Earned | What It's Used For |
 | --- | --- | --- |
 | **Bait** | Bought with Gold, or trickles in for free over time | Spent on every cast — the Stake *is* the Bait committed |
-| **Gold** | Appraising gems found in chests | Buying Bait; instantly skipping a rod level |
+| **Gold** | Appraising gems found in chests, or bought with USDG | Buying Bait; instantly skipping a rod level; opening Epic and Legendary chests |
 | **Pearl** | Found only in Epic and Legendary chests | Nothing yet — see Section 10 |
+| **USDG** | Depositing USDC on NEAR (when deposits are on) | Buying Gold |
 
 **Bait works like a shared, finite resource.** The whole game world draws from one Bait pool (capped at 50,000 units): buying Bait draws it down, and Bait spent fishing flows back in. On top of that, every player also gets a slow personal trickle of free Bait (topping up to 25 in reserve) so no one can ever be permanently stuck with nothing to fish with.
 
@@ -145,9 +147,11 @@ The shop sells one thing, at one rate:
 | --- | --- | --- | --- |
 | Bait x100 | 3 | 100 | 0.03 |
 
-The four discounted pack sizes that used to sit on this shelf (Tin/Pot/Bucket/Crate) are gone: a single flat rate is easier to read against the Gold anchor than four differently-discounted sizes, and the shop's quantity buttons already let a player buy in bulk at the same rate. Buying at this price leaves the fishing loop Gold-positive at every rod and every Stake — see the net-Gold columns in `balance-tables.md`.
+The four discounted pack sizes that used to sit on this shelf (Tin/Pot/Bucket/Crate) are gone: a single flat rate is easier to read against the Gold anchor than four differently-discounted sizes, and the shop's quantity buttons already let a player buy in bulk at the same rate. At this price the fishing loop is Gold-positive at Stake 1, 20 and 40, but **Stake 5 and 10 lose Gold at every rod level** once bait is bought rather than trickled — see the net-Gold columns in `balance-tables.md`. Fixing those lanes is an open balance decision (`web3-sustainability-rebalance-plan.md` section 3.2).
 
 ## 6. Treasure Chests & Gem Rewards
+
+**Two Gold sinks sit on this loop.** Opening an Epic chest costs **6 Gold** and a Legendary **20 Gold** (the chest's key); Common and Rare chests open free, and a player who can't pay keeps the chest. Every gem appraisal pays the graded price **minus a 15% assay fee**, shown as its own line on the appraisal sheet. Both come from section 3.3 of `web3-sustainability-rebalance-plan.md`; the gem values below are the price before the fee.
 
 A chest awards exactly **one** reward, drawn from a weighted table specific to its tier — never a bundle. Each tier can pay Fishing XP, Bait, its matching gem, and — for the top two tiers only — Pearl:
 
@@ -253,7 +257,7 @@ What's not yet part of the game, stated plainly:
 
 | Not currently in the game | What that means today |
 | --- | --- |
-| Monetization | No purchases, subscriptions, or premium currency exist. Every currency is earned by playing. |
+| Withdrawals or trading | USDC can be deposited but nothing can be taken out, and players can't trade with each other. |
 | A prestige or reset system | Rod Level 10 is a hard ceiling — there is no way to reset progress for a permanent bonus. |
 | Quests, achievements, daily rewards, or timed events | The leaderboard, chat, and the shared world are the only ongoing reasons to return. |
 | Progress while offline | The game only advances while a player is actively connected; nothing accrues while the browser is closed. |

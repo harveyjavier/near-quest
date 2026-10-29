@@ -32,7 +32,7 @@ Set in Railway (or Heroku) under **Variables**. Locally, copy
 | `NODE_ENV` | **in production** | *(unset)* | `production` on any public deploy. Among other things it hard-disables fake deposits. Railway's Node builder sets it; check that it did. |
 | `TRUST_PROXY` | **on Railway/Heroku** | *(unset — off)* | Number of proxies in front of the server: `1` on Railway or Heroku. Leave unset when nothing sits in front, because `X-Forwarded-For` is then whatever the client sends, and trusting it lets anyone dodge the sign-in rate limit. |
 | `NEAR_NETWORK` | no | `testnet` | `testnet` or `mainnet`. The client follows the server. |
-| `NEAR_RPC_URL` | no | `https://rpc.<network>.near.org` | Used for sign-in key checks and deposit lookups. |
+| `NEAR_RPC_URL` | **in production** | `https://rpc.<network>.near.org` | Used for sign-in key checks and deposit lookups. The public endpoint is heavily rate-limited; use a dedicated provider. |
 | `NEAR_ARCHIVAL_RPC_URL` | no | `https://archival-rpc.<network>.near.org` | Asked only when `NEAR_RPC_URL` no longer has a deposit's transaction (regular nodes keep a few days; claims are retried for 7). Point it at your provider's archival endpoint in production. |
 | `NEAR_AUTH_RECIPIENT` | no | `robins-club` | Shown in the wallet's sign-in prompt and part of every signature. |
 | `NEAR_TREASURY_ACCOUNT` | to take deposits | *(unset)* | Turns on USDC deposits. Must be registered for storage on the USDC contract. |
@@ -156,7 +156,7 @@ Everything in `server/src/config/` is live game balance. The loop:
 
 1. **Edit the config module.** Never scatter a constant into a game module —
    `server/src/game/*` reads from config and should keep doing so.
-2. **Run the tests.** `npm test` — 107 server tests cover odds, economy,
+2. **Run the tests.** `npm test` — the server tests cover odds, economy,
    progression and the emission model, and several assert on config invariants.
 3. **Regenerate the balance report.** `npm run balance` prints the current
    tables; `node server/tools/gdd-balance.js --write` rewrites

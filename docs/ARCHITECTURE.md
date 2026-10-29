@@ -8,7 +8,8 @@ limits of the current design are.
 - [The harbor room](#the-harbor-room)
 - [Two channels: shared state and private messages](#two-channels-shared-state-and-private-messages)
 - [The cast loop](#the-cast-loop)
-- [Identity without accounts](#identity-without-accounts)
+- [Identity: guests and wallets](#identity-guests-and-wallets)
+- [Deposits](#deposits)
 - [Persistence](#persistence)
 - [The emission monitor](#the-emission-monitor)
 - [Scaling limits](#scaling-limits)
@@ -192,9 +193,10 @@ other still sends the player a fresh notice.
 
 ---
 
-## Identity without accounts
+## Identity: guests and wallets
 
-There is no login, no email, no password and no account recovery.
+There is no email, no password and no account recovery. A player is either a
+guest (a token in the browser) or a guest bound to a wallet.
 
 On first join the server generates an opaque 64-character `sessionToken`,
 returns it once in a `session` message, and the browser keeps it in
@@ -214,7 +216,60 @@ Consequences that must be stated to players and to whoever operates this:
 - **The token is not a password.** Anyone holding it holds that session. It is
   never logged and never leaves the browser except over WSS.
 
-The only human-supplied field stored anywhere is the display name.
+### Wallet sign-in
+
+A player can sign in with a NEAR wallet (Meteor, HERE, MyNearWallet) or with
+MetaMask. Either way the server proves control of a NEAR account and binds the
+player to it (`nearAccountId`, one player per account). The wire format is in
+[PROTOCOL.md](PROTOCOL.md#http-endpoints).
+
+- **NEAR wallets** sign a one-time challenge (NEP-413). The server checks the
+  ed25519 signature, then asks NEAR RPC that the key is a full-access key of
+  the account. A function-call key is not enough: any app the user once
+  approved can hold one.
+- **MetaMask** can't sign NEP-413, so it signs the challenge text with
+  `personal_sign`. The server recovers the address, which is itself the NEAR
+  account id (an eth-implicit account, NEP-518). Addresses on NEAR's banned
+  list are refused.
+- **Challenges** are 32 random bytes, used once, valid 5 minutes, capped at
+  10,000 outstanding and 20 auth requests per IP per minute. A challenge is
+  only spent when a session is issued. The per-IP count only sees real client
+  IPs when `TRUST_PROXY` matches the proxies in front of the server.
+- **Sign-in still ends in a session token**, so the room join is the same for
+  guests and wallets. But each wallet sign-in issues a new token and kills the
+  old one, saving and kicking any seat on it first. Wallet tokens also expire
+  after 30 days, and `POST /auth/signout` revokes one. A wallet device whose
+  token died gets "sign in again" (join code 4401), never a fresh guest.
+  Expiry is checked when a player joins, not during play: a session that
+  expires mid-play runs until the player leaves and joins again. A reconnect
+  inside the grace window skips the check too, since it never runs `onJoin`.
+- **First wallet sign-in on a device** binds that device's guest save, unless
+  the wallet already owns a player. Then the server refuses with
+  `SWITCH_REQUIRED` before changing anything, the player is asked, and only a
+  confirmed retry rotates the wallet's token.
+
+Guest tokens never expire and can't be revoked from the server, because a guest
+has no way back in.
+
+The only human-supplied field stored is the display name. Wallet players also
+carry their public NEAR account id.
+
+## Deposits
+
+USDG is the in-game dollar balance. It is filled by sending USDC on NEAR to the
+treasury account (`NEAR_TREASURY_ACCOUNT`), from either kind of wallet.
+
+The client never says how much was paid. It sends a transaction hash; the
+server reads the final transaction from RPC and credits the sum of successful
+`ft_transfer` receipts on the USDC contract whose predecessor is the player and
+whose receiver is the treasury. Checking receipts rather than the outer
+transaction is what makes MetaMask work: its transfers are signed by a NEAR
+relayer, but `ft_transfer` always spends the predecessor's tokens, so a relayer
+can't redirect or fake one. Each hash credits once (`deposits` collection,
+unique index).
+
+Without a treasury, the Deposit button is off. `ALLOW_FAKE_DEPOSITS=true`
+turns it into a free credit for local development. There are no withdrawals.
 
 ---
 
@@ -320,13 +375,20 @@ What is defended, and what is explicitly not.
 - Firebase Hosting sets `X-Content-Type-Options`, `Referrer-Policy` and
   `X-Frame-Options` on every response.
 - Logs never contain connection strings or player data.
+- Wallet sign-in is signature-checked with one-use challenges, rate-limited,
+  and rotates the session token. See [Wallet sign-in](#wallet-sign-in).
+- Deposits are credited from the chain, never from a client figure, and each
+  transaction credits once. See [Deposits](#deposits).
 
 **Not defended, by design**
 
 - **Avatar position.** Cosmetic; see above.
-- **Session token theft.** Anyone with the token has the session. There is no
-  second factor because there is no account.
-- **Multi-accounting.** Nothing stops one person creating many guest sessions.
-  With no monetisation and no cross-player trade, there is nothing to gain.
+- **Session token theft.** Anyone with the token has the session until it is
+  replaced. For wallet players that is the next sign-in, a sign-out, or 30
+  days. For guests it is never.
+- **Multi-accounting.** Nothing stops one person creating many guest sessions
+  or using many wallets. There is no cross-player trade and no withdrawal, so
+  today there is nothing to farm out. That changes the moment value can leave
+  the game; see the rebalance plan's identity section before adding any.
 - **Display-name uniqueness.** Names are validated for shape, not reserved. Two
   players may share one.

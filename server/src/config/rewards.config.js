@@ -308,3 +308,14 @@ export const CHEST_TIER_WEIGHTS = {
 
 /** Hard cap on unopened chests held at once, so the inventory view stays sane. */
 export const MAX_UNOPENED_CHESTS = 60;
+
+/**
+ * Gold sinks from design/web3-sustainability-rebalance-plan.md section 3.3.
+ *
+ * The assayer keeps this share of every appraisal. Proportional to the gem
+ * faucet, so it stays calibrated whatever the gem ranges become.
+ */
+export const ASSAY_FEE_RATE = 0.15;
+
+/** Gold to open a chest of each tier (its "key"). Tiers not listed open free. */
+export const CHEST_KEY_COST = Object.freeze({ epic: 6, legendary: 20 });
