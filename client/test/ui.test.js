@@ -83,7 +83,8 @@ describe('wallet UI', { skip: !process.env.CI && noBrowser }, () => {
       },
       stdio: process.env.UI_TEST_LOG ? 'inherit' : 'ignore',
     });
-    vite = spawn('npx', ['vite', '--port', String(CLIENT_PORT), '--strictPort', '--host', '127.0.0.1'], {
+    // Via node, not npx: npx is a .cmd shim on Windows, which spawn cannot run.
+    vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--port', String(CLIENT_PORT), '--strictPort', '--host', '127.0.0.1'], {
       cwd: clientDir,
       env: { ...process.env, VITE_SERVER_URL: `ws://127.0.0.1:${SERVER_PORT}` },
       stdio: 'ignore',
